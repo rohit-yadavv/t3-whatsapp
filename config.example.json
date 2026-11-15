@@ -3,12 +3,17 @@
   "dataDir": ".data",
   "selfCommands": true,
   "accountWide": true,
-  "allowedSenderJids": ["YOUR_NUMBER@s.whatsapp.net", "YOUR_LID@lid"],
+  "allowedSenderJids": [
+    "YOUR_NUMBER@s.whatsapp.net",
+    "YOUR_LID@lid"
+  ],
   "projects": {
     "website": "/absolute/path/to/your/registered/website",
     "mobile-app": "/absolute/path/to/your/registered/mobile-app"
   },
   "routes": [],
   "pollIntervalMs": 15000,
-  "maxMessageAgeSeconds": 300
+  "maxMessageAgeSeconds": 300,
+  "rememberContext": true,
+  "noProject": "~/.t3/scratch"
 }
