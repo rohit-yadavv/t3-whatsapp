@@ -10,7 +10,7 @@ import type { Config } from '../src/config.js';
 import type { Snapshot, T3 } from '../src/t3.js';
 
 const bot = '100@s.whatsapp.net', owner = '200@s.whatsapp.net', group = '300@g.us';
-const config: Config = { t3Binary:'t3',dataDir:'.data',rememberContext:false,accountWide:false,projects:{},selfCommands:false,allowedSenderJids:[owner],routes:[{chatJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
+const config: Config = { t3Binary:'t3',dataDir:'.data',noProject:'/general',rememberContext:false,accountWide:false,projects:{},selfCommands:false,allowedSenderJids:[owner],routes:[{chatJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
 function message(id = 'm1', options: {sender?: string;quoted?:string;mention?:boolean;text?:string} = {}) {
   return normalize({key:{id,remoteJid:group,participant:options.sender ?? owner},messageTimestamp:Math.floor(Date.now()/1000),message:{extendedTextMessage:{text:options.text ?? '@100 fix the signup button',contextInfo:{mentionedJid:options.mention === false ? [] : [bot],stanzaId:options.quoted,quotedMessage:options.quoted ? {conversation:'Signup fails on mobile'} : undefined}}}});
 }
@@ -18,6 +18,7 @@ class FakeT3 implements T3 {
   calls: {project:string;prompt:string;thread?:string}[] = [];
   snapshot: Snapshot = {thread:{threadId:'t1',status:'running',latestRunId:'r1',pendingRequestCount:0},messages:[]};
   async submit(project:string,prompt:string,thread?:string) { this.calls.push({project,prompt,thread}); return {threadId:thread ?? 't1',runId:'r'+this.calls.length}; }
+  async listThreads() { return []; }
   async show() { return this.snapshot; }
 }
 function setup(t: TestContext, settings: Config = config) {
@@ -180,10 +181,11 @@ test('reconfiguring a group cannot reuse a thread belonging to its old project',
   const ack=store.pending()[0];
   const changed=new Bridge({...config,routes:[{chatJid:group,project:'/other-project'}]},store,t3,()=>{});
   assert.equal(changed.accept(message('plain-reply',{quoted:ack.id,mention:false}),[bot]),true);
-  assert.equal(store.tasks('awaiting_project').length,1);
+  assert.equal(store.tasks('awaiting_project').length,0);
   assert.equal(changed.accept(message('new-task',{quoted:ack.id}),[bot]),true);
   assert.equal(store.tasks('queued').length,0);
-  assert.equal(store.tasks('awaiting_project').length,2);
+  assert.equal(store.tasks('awaiting_project').length,0);
+  assert.equal(store.tasks('control').length,2);
 });
 test('pairing-mode store access does not mutate interrupted side-effect states', () => {
   const dir=mkdtempSync(join(tmpdir(),'t3-pair-store-')),path=join(dir,'state.sqlite');
@@ -199,4 +201,16 @@ test('long emoji responses retain complete Unicode characters across chunks', t 
   const text='a'.repeat(2999)+'😀'+'b'.repeat(100);
   bridge.enqueue(store.task('task')!,text);
   assert.equal(store.pending().map(m=>m.text).join(''),text);
+});
+
+test('restart suppresses unsent legacy project-picker prompts without replaying tasks',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'t3-legacy-picker-')),path=join(dir,'state.sqlite');
+  let store=new Store(path);
+  try {
+    store.add('legacy',message(),' ',undefined,'awaiting_project');
+    store.outgoing('picker',store.task('legacy')!,'Which project should handle this?');
+    store.close();store=new Store(path);
+    assert.equal(store.pending().length,0);assert.equal(store.tasks('queued').length,0);
+    assert.equal(store.tasks('awaiting_project').length,1);
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });

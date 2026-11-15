@@ -12,10 +12,13 @@ const snapshotSchema = z.object({
   }),
   messages:z.array(z.object({role:z.enum(['user','assistant']),runId:z.string().nullable(),text:z.string()})),
 });
+const threadListSchema=z.array(z.object({threadId:z.string().min(1),title:z.string()}));
+export type ThreadSummary=z.infer<typeof threadListSchema>[number];
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export interface T3 {
   submit(project: string, prompt: string, thread?: string): Promise<{threadId: string; runId: string}>;
   show(thread: string): Promise<Snapshot>;
+  listThreads(project: string): Promise<ThreadSummary[]>;
 }
 interface CommandOptions { timeoutMs?: number; killGraceMs?: number; maxOutputBytes?: number }
 export function command(binary: string, args: string[], input = '', options: CommandOptions = {}): Promise<unknown> {
@@ -72,6 +75,11 @@ export class T3Cli implements T3 {
     if (!result.success || (thread && result.data.threadId !== thread)) {
       throw new Error('Unexpected T3 submission response. Check T3 before retrying.');
     }
+    return result.data;
+  }
+  async listThreads(project: string): Promise<ThreadSummary[]> {
+    const result=threadListSchema.safeParse(await command(this.binary,['thread','list','--project',project,'--json']));
+    if (!result.success) throw new Error('Unexpected T3 thread list.');
     return result.data;
   }
   async show(thread: string): Promise<Snapshot> {

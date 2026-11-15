@@ -43,11 +43,11 @@ test('active conversations are isolated between chats',async t=>{
   s.bridge.accept(own('other','@bot hi',undefined,'300@g.us'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].project,'/general');assert.equal(s.calls[1].thread,undefined);
   assert.equal(s.store.context(chat)?.project,'/website');
 });
-test('removed active projects ask rather than silently selecting another workspace',async t=>{
+test('removed active projects fall back to general conversation without a selector',async t=>{
   const s=setup(t);s.store.focusChat(chat,'/website','old-thread');
   const changed=new Bridge({...config,projects:{mobile:'/mobile'}},s.store,s.t3,()=>{});
   changed.accept(own('follow','@bot fix it'),[owner]);await changed.submitQueued();
-  assert.equal(s.calls.length,0);assert.equal(s.store.tasks('awaiting_project').length,1);
+  assert.equal(s.calls.length,1);assert.equal(s.calls[0].project,'/general');assert.equal(s.store.tasks('awaiting_project').length,0);
 });
 test('an ambiguous earlier submission prevents automatic continuation',async t=>{
   const s=setup(t);s.bridge.accept(own('first','@bot #website fix'),[owner]);
@@ -60,4 +60,12 @@ test('explicit new with an instruction starts another thread in the selected pro
   s.bridge.accept(own('new','@bot #website new investigate another issue'),[owner]);await s.bridge.submitQueued();
   assert.equal(s.calls.length,2);assert.equal(s.calls[1].thread,undefined);
   assert.equal(JSON.parse(s.calls[1].prompt.split('\n\n').at(-1)!).instruction,'investigate another issue');
+});
+
+test('mentioning project names in ordinary research text never routes out of No project',async t=>{
+  const s=setup(t);s.bridge.accept(own('research','@bot lets research how to improve our website and mobile companion branding'),[owner]);
+  await s.bridge.submitQueued();assert.equal(s.calls[0].project,'/general');
+  assert.equal(s.store.tasks('awaiting_project').length,0);
+  assert.ok(s.store.pending().every(m=>!m.text.includes('Which project')));
+  assert.match(s.calls[0].prompt,/without asking the user to select a project/);
 });

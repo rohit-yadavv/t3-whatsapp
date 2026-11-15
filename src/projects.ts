@@ -17,7 +17,7 @@ export function parseProjectCommand(instruction: string, projects: ReadonlyMap<s
   if (text.startsWith('#') && !tags.some(tag=>tag.index===0)) return {kind:'task',instruction:text,error:'Invalid project selector. Use #project-name followed by your task.'};
   const selectors=tags.filter(tag=>tag.index===0 || projects.has(tag[1].toLowerCase()));
   const aliases=[...new Set(selectors.map(tag=>tag[1].toLowerCase()))];
-  if (aliases.length>1) return {kind:'task',instruction:text,error:'Choose one project per task. Reply with one #project-name.'};
+  if (aliases.length>1) return {kind:'task',instruction:text,error:'Use one #project-name per command.'};
   if (!aliases.length) return {kind:'task',instruction:text};
   const alias=aliases[0];
   const body=text.replace(/(^|\s)#([a-z0-9][a-z0-9_-]{0,63})(?=\s|$)/gi,(match,before:string,name:string)=>name.toLowerCase()===alias ? before : match).trim();

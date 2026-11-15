@@ -17,7 +17,7 @@ const schema = z.object({
   selfCommands:z.boolean().default(false),
   accountWide:z.boolean().default(false),
   rememberContext:z.boolean().optional(),
-  noProject:target.optional(),
+  noProject:target.default('~/.t3/scratch'),
   allowedSenderJids:z.array(z.string().regex(/^\d+@(s\.whatsapp\.net|lid)$/)).min(1),
   projects:z.record(z.string().regex(aliasPattern),target).default({}),
   routes:z.array(route).default([]),

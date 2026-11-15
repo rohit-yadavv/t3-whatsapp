@@ -17,7 +17,7 @@ process.umask(0o077);
 const pairingOnly = process.argv[2] === 'pair';
 const config: Config = pairingOnly ? {
   t3Binary:'t3', dataDir:resolve(process.env.T3_WHATSAPP_DATA_DIR ?? '.data'),
-  selfCommands:false, accountWide:false, projects:{}, allowedSenderJids:[], routes:[], pollIntervalMs:15000, maxMessageAgeSeconds:300,
+  selfCommands:false, accountWide:false, noProject:'~/.t3/scratch', projects:{}, allowedSenderJids:[], routes:[], pollIntervalMs:15000, maxMessageAgeSeconds:300,
 } : loadConfig();
 const error = (e: unknown) => console.error(e instanceof Error ? e.message : 'Bridge operation failed.');
 

@@ -16,6 +16,7 @@ export class Store {
         payload TEXT NOT NULL, notice TEXT, UNIQUE(group_jid, message_id));
       CREATE TABLE IF NOT EXISTS links (group_jid TEXT, message_id TEXT, thread_id TEXT NOT NULL, PRIMARY KEY(group_jid,message_id));
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, group_jid TEXT, task_id TEXT, text TEXT, quote TEXT, state TEXT);
+      CREATE TABLE IF NOT EXISTS thread_aliases (project TEXT, name TEXT, thread_id TEXT NOT NULL, PRIMARY KEY(project,name));
       CREATE TABLE IF NOT EXISTS chat_context (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL, thread_id TEXT, task_id TEXT);
       CREATE TABLE IF NOT EXISTS chat_mappings (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sent_messages (id TEXT PRIMARY KEY, content TEXT NOT NULL);
@@ -24,7 +25,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state);
     `);
     // A process could have died after an external side effect. Never blindly repeat it.
-    if (recover) this.db.exec("UPDATE tasks SET state='review' WHERE state='submitting'; UPDATE outbox SET state='review' WHERE state='sending';");
+    if (recover) this.db.exec("UPDATE tasks SET state='review' WHERE state='submitting'; UPDATE outbox SET state='review' WHERE state='sending'; UPDATE outbox SET state='superseded' WHERE state='pending' AND task_id IN (SELECT id FROM tasks WHERE state='awaiting_project');");
   }
   findThread(group: string, id?: string, project?: string): string | undefined {
     if (!id) return;
@@ -56,6 +57,18 @@ export class Store {
     this.db.prepare('UPDATE chat_context SET thread_id=? WHERE chat_jid=? AND task_id=?').run(thread,task.group_jid,task.id);
   }
   attachThread(id: string, thread: string) { this.db.prepare('UPDATE tasks SET thread_id=? WHERE id=?').run(thread,id); }
+  clearContextForTask(task: Task) {
+    this.db.prepare('DELETE FROM chat_context WHERE chat_jid=? AND task_id=?').run(task.group_jid,task.id);
+  }
+  threadAlias(project: string, name: string): string | undefined {
+    return (this.db.prepare('SELECT thread_id FROM thread_aliases WHERE project=? AND name=?').get(project,name) as {thread_id:string} | undefined)?.thread_id;
+  }
+  rememberThread(project: string, name: string, thread: string) {
+    this.db.prepare('INSERT OR REPLACE INTO thread_aliases VALUES (?,?,?)').run(project,name,thread);
+  }
+  setPayload(id: string, payload: unknown) {
+    this.db.prepare('UPDATE tasks SET payload=? WHERE id=?').run(JSON.stringify(payload,BufferJSON.replacer),id);
+  }
   isOutgoing(group: string, id?: string): boolean {
     return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE group_jid=? AND id=?').get(group, id));
   }
