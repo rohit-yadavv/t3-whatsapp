@@ -23,6 +23,52 @@ The assistant uses T3's tools to discover projects, find threads by title, read 
 @bot new
 ```
 
+## Local conversation history
+
+Personal chats, groups, and Message yourself use the same history policy. Text and captions are captured in enabled chats even when nobody mentions the bot, along with confirmed bot text replies. With `accountWide: true`, this covers supported chats on the authorized paired account. Restricted mode captures only configured routes. Other participants' messages remain context; only the existing authorized sender can issue commands. History sync, edits, deletions, and reader output never dispatch commands.
+
+History lives in private `.data/history.sqlite`, separate from the task database. Rows retain the account/chat/message IDs, sender identifiers and display name when available, message time, reply ID, bot/from-me flags, latest text, and observed edit/deletion metadata. Repeated live/history events deduplicate. Edits replace text without extending its original retention time. Observed deletions remove text and leave minimal tombstones until expiry, preventing stale sync from restoring it. Clearing a chat also suppresses older sync messages. Updates that arrive before an original message are held until it is observed; no missing text is invented.
+
+Configure this account's policy in its private `config.json`:
+
+```json
+"history": {
+  "retentionDays": 30,
+  "maxReadMessages": 50,
+  "maxReadChars": 12000,
+  "maxPromptChars": 8000,
+  "importRecent": true
+}
+```
+
+Each account/configuration can choose its own retention. Only one paired account is active in a bridge; there is no multi-user service. Restart after changing the settings. Shorter retention prunes older records immediately on startup; pruning also runs about every 15 minutes in the existing bridge timer. Reads enforce expiry even before the next physical prune. Increasing retention collects a longer window going forward and does not restore pruned records. `retentionDays: 0` disables history capture/retrieval and prunes that account's stored history and scopes on startup. Account control metadata is retained to enforce pruning; previously paired accounts' text is isolated and expires under their saved settings.
+
+These settings govern the local history database. Existing accepted-task audit data, generated files, backups, and T3/provider conversations have separate lifetimes; changing history retention does not erase them or delete anything on the phone. The reader is a scoped application interface, not an OS sandbox against programs already running as your Mac user. Keep the data directory private.
+
+### Available recent history
+
+The bridge uses Baileys `messaging-history.set` for initial/recent/on-demand batches, with `syncFullHistory: false`. It filters imported messages by retention and chat authorization. On a chat's first observed live activity, if no recent batch has arrived, it makes at most one bounded 50-message request to the phone using `fetchMessageHistory`. This state survives restart. It does not recursively fetch older pages or attempt a full archive. `importRecent: false` disables these sync/import requests while keeping live capture enabled.
+
+The linked device and phone may supply no older text, incomplete batches, or only shallow recent history. Existing pairing does not guarantee a fresh initial sync. The reader always reports `complete: false`, coverage dates/counts, and import state; absence of a stored message is not proof it was never sent. Phone availability and unobserved edits/deletions can also leave gaps. Do not re-pair or run an exhaustive backfill just to fill these gaps.
+
+### Scoped read-only reader
+
+Each accepted agent task includes `historyContext` with the paired account, originating chat, trigger message, optional quoted-message ID, and a `readCommand` argument array. The agent runs that command locally only when earlier context is relevant. It supports:
+
+```text
+<readCommand> recent --limit 20
+<readCommand> search --query "onboarding"
+<readCommand> recent --limit 20 --cursor <nextCursor>
+<readCommand> get --id <quotedMessageId>
+<readCommand> get --id <messageId> --offset <nextTextOffset>
+```
+
+For manual use, `pnpm run history --database .data/history.sqlite --scope <token-from-task> recent` invokes the same reader. The scoped token is created by the bridge; there is no unscoped list/search endpoint, SQL execution option, MCP server, HTTP service, or additional daemon. The process opens SQLite read-only and exits. Tokens bind reads to one enabled account/chat and at or before the trigger's message time, and expire with retention. Scopes for other paired accounts or removed chats are rejected. Pagination cannot change that scope.
+
+Storage retention is independent from retrieval size. Each read enforces `maxReadMessages` and the serialized JSON budget `maxReadChars`. Long text can be fetched in chunks with `get --offset`; storage itself caps a single message at 65,536 characters and marks truncation. The agent is instructed to keep selected history forwarded into a task/handoff within `maxPromptChars`, include relevant requirements with sender/time/message references, and pass the scoped reader reference if the worker needs more. This forwarding limit is an agent instruction; reader limits are enforced in code. No entire chat is automatically inserted into a prompt.
+
+All retrieved text is labelled untrusted conversation data. Historical `@bot` messages, quoted requests, or delivery instructions cannot authorize new actions or opt into result delivery. The current authenticated trigger is the instruction. Missing, deleted, pruned, disabled, or unavailable context must be reported honestly when it matters.
+
 ## Project context and mappings
 
 Every assistant conversation starts and remains in No project, even when a hashtag or mapping is present. A `#project-name` adds project context to the prompt. Known aliases are resolved to paths or IDs from `config.json`; unknown names are passed to T3 for discovery. Your instruction stays intact. Quoted text cannot select a project hint.
@@ -41,7 +87,7 @@ Initial mappings live in private `config.json` under `routes`. Mappings saved by
 
 ## Delegation and delivery
 
-WhatsApp is a task inbox and remote control. The assistant uses T3 tools to resolve the requested project or thread and hand off substantive work, then returns a short confirmation without waiting for the entire task. The work request includes your instruction, relevant quoted context, requested deliverables, provider/model/skills, and project hint. The bridge verifies the destination thread and accepted run before sending a success confirmation. It does not send a generic “I’m on it” message.
+WhatsApp is a task inbox and remote control. The assistant uses T3 tools to resolve the requested project or thread and hand off substantive work, then returns a short confirmation without waiting for the entire task. The work request includes your instruction, relevant quoted context, requested deliverables, provider/model/skills, and project hint. The bridge verifies the destination thread and accepted run before sending a success confirmation. Routine confirmations should be one short, contextual sentence without repeating the instruction or explaining internal routing/delivery policy. A queued handoff must say queued/sent rather than claiming a todo is already saved. Longer answers remain available when requested or needed for ambiguity/errors. It does not send a generic “I’m on it” message.
 
 | Request | WhatsApp response |
 | --- | --- |
@@ -101,6 +147,7 @@ Edit these fields:
 - `projects`: optional shorthand aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. Hashtags add these targets to the prompt; T3 can discover other projects by name.
 - `noProject`: the registered T3 No project workspace path or ID used for every assistant conversation. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The legacy `rememberContext` field is accepted for compatibility but ignored; per-chat continuity is always enabled.
 - `routes`: optional initial chat mappings, for example `{"chatJid":"CHAT_ID","project":"PROJECT_PATH_OR_ID"}`. Account-wide mode does not require any routes. Saved `use ... for this chat` commands override configured mappings.
+- `history`: optional per-account history policy described above; defaults to 30 days with bounded reads and best-effort recent import.
 - `dataDir`: session and database directory, relative to the config file. Default `.data` matches pairing mode when run from this folder. For another pairing directory use `T3_WHATSAPP_DATA_DIR=/absolute/path pnpm pair`.
 
 Keep config and session data private. They are gitignored. New assistant threads inherit the No project workspace's default model and permissions in T3 Code. T3 handles the settings for any project work the assistant starts.
@@ -164,7 +211,7 @@ pnpm test
 pnpm build
 ```
 
-`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, delivery contracts, opt-in completion tracking, generated-file delivery, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
+`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, delivery contracts, opt-in completion tracking, generated-file delivery, scoped history, retention and read budgets, edit/delete handling, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
 Incoming commands are text only. Voice transcription, remote permission approvals, private cross-chat result routing, and a macOS background service are not implemented. Outgoing generated files are supported when requested. Discovery and handoff behavior depend on the T3 tools available to the chosen agent. Completion tracking currently uses the local T3 CLI and the exact accepted work run; it does not follow later desktop runs or linked-machine work. Mapping commands use no extra AI calls.
 
@@ -173,6 +220,7 @@ Incoming commands are text only. Voice transcription, remote permission approval
 Follow [CONTRIBUTING.md](../CONTRIBUTING.md). Commits use `<type>: <short description>`.
 
 - [Baileys](https://github.com/WhiskeySockets/Baileys), pinned to `7.0.0-rc14`.
+- [Baileys history sync documentation](https://github.com/WhiskeySockets/baileys.wiki-site/blob/main/docs/socket/history-sync.md).
 - [T3 host scripting documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md).
 - Related work: [Toucan Router](https://github.com/salalaslam/toucan-router). Its documentation informed the integration comparison; this is a separate implementation. No Toucan code or credentials are bundled.
 

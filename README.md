@@ -53,10 +53,15 @@ Send commands in a chat, group, or **Message yourself**. Reply to an issue to in
 
 - Each new chat or group gets its own **No project** conversation. Later messages continue it, including after restart. If you settle that thread in T3, the next message starts a fresh No project conversation.
 - Ask for “the report here”, “attach it”, or “let me know when it finishes” to opt into WhatsApp delivery. Requested files are attached; local file paths are never presented as public links.
+- Text from personal chats and groups is kept locally for 30 days, including ordinary messages and bot replies. The agent retrieves relevant context on demand; history never triggers commands. Retention and retrieval limits are configurable in `config.json`. Available recent phone history is imported on a best-effort basis.
 - Mention projects and thread titles naturally; the agent uses T3 tools to find them and perform your request.
 - `#project` and chat mappings add project context to the prompt. The conversation stays in No project.
 - Reply to an older bot message to continue its conversation, or send exactly `@bot new` to reset this chat.
 - Use `@bot use website for this chat` to save a default project hint; `@bot unmap this chat` clears it.
+
+Routine bot confirmations stay short and contextual, with verified wording such as “Queued the onboarding todo in T3.”
+
+See [history and configuration](docs/configuration.md#local-conversation-history) for retention settings and the scoped reader.
 
 **Only your own account can issue commands. Replies appear in the same chat, visible to its members.** Use Message yourself for private conversations. Permission requests must be answered in T3 Code.
 
