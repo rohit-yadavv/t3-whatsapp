@@ -2,6 +2,7 @@
   "name": "t3-whatsapp-bot",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Your WhatsApp companion for T3 Code.",
   "type": "module",
   "packageManager": "pnpm@12.21.0",

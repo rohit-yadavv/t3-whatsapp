@@ -63,3 +63,7 @@ This is an unofficial integration using [Baileys](https://github.com/WhiskeySock
 Text messages only. Keep `config.json` and `.data/` private; they contain configuration, session credentials, and conversation data.
 
 See the [configuration and reference guide](docs/configuration.md) for all commands, troubleshooting, and current limitations. Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE) © 2026 Rohit Yadav.
