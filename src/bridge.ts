@@ -139,7 +139,6 @@ export class Bridge {
         this.store.atomic(() => {
           this.store.submitted(task, result.threadId, result.runId);
           this.store.bindContext(task,result.threadId);
-          this.enqueue(task,'I’m on it.');
         });
         busyThreads.add(result.threadId);
       } catch (error) {

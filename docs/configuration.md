@@ -4,13 +4,13 @@
 
 From your existing WhatsApp account, type `@bot` followed by a message in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Mention projects and thread titles in ordinary language; T3 handles discovery and the requested action.
 
-A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Conversational answers and project/thread actions come from your T3 agent and use its configured provider allowance or API billing. Authentication, conversation delivery, acknowledgements, and mapping commands use ordinary code without separate AI calls.
+A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Conversational answers and project/thread actions come from your T3 agent and use its configured provider allowance or API billing. Authentication, conversation delivery, and mapping commands use ordinary code without separate AI calls.
 
 ## One conversation per chat
 
-The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation. This is a remembered conversation, not a continuously running agent. Different chats do not share bridge conversation state.
+The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation. This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Successful submissions produce no acknowledgement; WhatsApp receives the agent’s answer directly. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
 
-Replying to an older bot acknowledgement or result continues its conversation if it is unsettled and makes it active in the same chat again. If that conversation is settled, the reply starts a fresh No project thread instead. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
+Replying to an older bot response continues its conversation if it is unsettled and makes it active in the same chat again. If that conversation is settled, the reply starts a fresh No project thread instead. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
 
 The assistant uses T3's tools to discover projects, find threads by title, read relevant context, forward messages, or create threads when requested. There is no bridge thread selector, title regex, numbered selection menu, or thread configuration. If the requested destination is ambiguous, the agent can ask you to clarify.
 
@@ -100,7 +100,7 @@ In any personal chat, group, or Message yourself, send `@bot hi`, or provide a p
 @bot #website Explain this project briefly. Don't change any files.
 ```
 
-Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `[T3 Bot]`, because commands and replies use your number. Reply to an acknowledgement or result to continue that task; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
+Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `[T3 Bot]`, because commands and replies use your number. Reply to a bot response to continue that conversation; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
 
 Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Accepted conversation messages and replies are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
 

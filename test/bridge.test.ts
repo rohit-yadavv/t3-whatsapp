@@ -38,24 +38,18 @@ test('only an authorized sender mentioning the real bot in a routed group starts
   assert.equal(bridge.accept(message(),[bot]),false);
   assert.equal(store.tasks('queued').length,1);
 });
-test('initial task receives quoted context and replies to its acknowledgement continue the same thread', async t => {
+test('only the agent answer is sent and replies to it continue the same thread', async t => {
   const {bridge,store,t3} = setup(t);
-  bridge.accept(message('first',{quoted:'bug'}),[bot]);
-  await bridge.submitQueued();
-  assert.match(t3.calls[0].prompt,/Signup fails on mobile/);
-  assert.equal(t3.calls[0].thread,undefined);
-  const ack = store.pending()[0];
-  assert.equal(store.requestForMessage(group,ack.id)?.thread_id,'t1');
-  assert.equal(bridge.accept(message('follow',{quoted:ack.id,mention:false,text:'Also fix desktop'}),[bot]),true);
-  await bridge.submitQueued();
-  assert.equal(t3.calls.length,1,'follow-up waits for the active request');
-  t3.snapshot.thread.status='completed';
-  t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'Fixed and tested.'}];
-  await bridge.collectResults(); await bridge.collectResults();
-  assert.equal(store.pending().filter(m=>m.text==='Fixed and tested.').length,1);
-  await bridge.submitQueued();
-  assert.equal(t3.calls[1].thread,'t1');
-  assert.equal(store.requestForMessage('other@g.us',ack.id)?.thread_id,undefined);
+  bridge.accept(message('first',{quoted:'bug'}),[bot]);await bridge.submitQueued();
+  assert.match(t3.calls[0].prompt,/Signup fails on mobile/);assert.equal(t3.calls[0].thread,undefined);
+  assert.equal(store.pending().length,0,'submission should not produce an acknowledgement');
+  t3.snapshot.thread.status='completed';t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'Fixed and tested.'}];
+  await bridge.collectResults();await bridge.collectResults();
+  assert.equal(store.pending().length,1);const reply=store.pending()[0];assert.equal(reply.text,'Fixed and tested.');
+  assert.equal(store.requestForMessage(group,reply.id)?.thread_id,'t1');
+  assert.equal(bridge.accept(message('follow',{quoted:reply.id,mention:false,text:'Also fix desktop'}),[bot]),true);
+  await bridge.submitQueued();assert.equal(t3.calls[1].thread,'t1');
+  assert.equal(store.requestForMessage('other@g.us',reply.id)?.thread_id,undefined);
 });
 test('pending approvals are surfaced once and never accepted by the bridge', async t => {
   const {bridge,store,t3} = setup(t);
@@ -122,21 +116,16 @@ test('single-account mode accepts typed @bot only from the linked and allowliste
   assert.match(t3.calls[0].prompt,/"instruction":"Explain this project"/);
   assert.equal(store.tasks('running').length,1);
 });
-test('own replies to bot output continue the task; generated acknowledgements and results never loop', async t => {
-  const {bridge,t3,store}=setup(t,selfConfig);
-  bridge.accept(own(),[bot]); await bridge.submitQueued();
-  const ack=store.pending()[0];
-  assert.match(ack.text,/^\[T3 Bot\]/);
-  assert.equal(bridge.accept(own(ack.id,'@bot fake echo','own1'),[bot]),false,'outbox ID blocks even a command-like echo');
-  assert.equal(bridge.accept(own('follow','Also explain tests',ack.id),[bot]),true);
-  assert.equal(bridge.accept(own('normal-reply','thanks','own1'),[bot]),false,'plain replies to user messages are not tasks');
-  t3.snapshot.thread.status='completed';
-  t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'@bot This is the result'}];
-  await bridge.collectResults();
-  const result=store.pending().find(m=>m.text.includes('This is the result'))!;
+test('own replies to bot answers continue the task and generated results never loop', async t => {
+  const {bridge,t3,store}=setup(t,selfConfig);bridge.accept(own(),[bot]);await bridge.submitQueued();
+  assert.equal(store.pending().length,0);
+  assert.equal(bridge.accept(own('normal-reply','thanks','own1'),[bot]),false,'plain replies to user messages are ignored');
+  t3.snapshot.thread.status='completed';t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'@bot This is the result'}];
+  await bridge.collectResults();const result=store.pending()[0];assert.match(result.text,/^\[T3 Bot\]/);
   assert.equal(bridge.accept(own(result.id,result.text,'own1'),[bot]),false);
-  await bridge.submitQueued();
-  assert.equal(t3.calls[1].thread,'t1');
+  assert.equal(bridge.accept(own(result.id,'@bot fake echo','own1'),[bot]),false,'recorded outgoing ID blocks a command-like echo');
+  assert.equal(bridge.accept(own('follow','Also explain tests',result.id),[bot]),true);
+  await bridge.submitQueued();assert.equal(t3.calls[1].thread,'t1');
 });
 test('outbox echo suppression survives a restart, including ambiguous sends', () => {
   const dir=mkdtempSync(join(tmpdir(),'t3-wa-echo-')),path=join(dir,'test.sqlite');
@@ -176,9 +165,10 @@ test('a second waiting episode produces a fresh notice after the thread resumes'
   assert.equal(store.pending().filter(m=>m.text.includes('needs your input')).length,2);
 });
 test('changing a group mapping updates prompt context without moving its conversation', async t => {
-  const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();const ack=store.pending()[0];
+  const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();
+  t3.snapshot.thread.status='completed';await bridge.collectResults();const reply=store.pending()[0];
   const changed=new Bridge({...config,routes:[{chatJid:group,project:'/other-project'}]},store,t3,()=>{});
-  changed.accept(message('reply',{quoted:ack.id,mention:false,text:'explain more'}),[bot]);
+  changed.accept(message('reply',{quoted:reply.id,mention:false,text:'explain more'}),[bot]);
   t3.snapshot.thread.status='completed';await changed.collectResults();await changed.submitQueued();
   assert.equal(t3.calls[1].project,'/general');assert.equal(t3.calls[1].thread,'t1');
   assert.equal(JSON.parse(t3.calls[1].prompt.split('\n\n').at(-1)!).projectContext.projects[0].target,'/other-project');

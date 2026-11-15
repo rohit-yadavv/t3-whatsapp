@@ -51,15 +51,14 @@ test('shutdown during submission permits that task to settle but starts no subse
   s.t3.submit=async()=>{s.submissions.push('first');s.disable();return {threadId:'t1',runId:'r1'};};
   await s.worker.tick();assert.deepEqual(s.submissions,['first']);assert.equal(s.sends.length,0);assert.equal(s.store.tasks('queued').length,1);
 });
-test('acknowledgement is delivered before the next independent submission', async t=>{
-  const s=setup(t);s.queue('first');s.queue('second');
-  let submissions=0;
-  s.t3.submit=async()=>{
-    submissions++;
-    if (submissions===2) assert.equal(s.sends.length,1);
-    return {threadId:`t${submissions}`,runId:`r${submissions}`};
-  };
-  await s.worker.tick();assert.equal(s.sends.length,2);assert.equal(s.errors.length,0);
+test('successful submissions stay silent and only completed answers are delivered once', async t=>{
+  const s=setup(t);s.queue('first');s.queue('second');let submissions=0;
+  s.t3.submit=async()=>{submissions++;return {threadId:`t${submissions}`,runId:`r${submissions}`};};
+  await s.worker.tick();assert.equal(submissions,2);assert.equal(s.sends.length,0);
+  s.t3.show=async thread=>({thread:{threadId:thread,status:'completed',latestRunId:thread==='t1' ? 'r1' : 'r2',settled:false,pendingRequestCount:0},messages:[{role:'assistant',runId:thread==='t1' ? 'r1' : 'r2',text:'The answer'}]});
+  await s.worker.tick();await s.worker.tick();assert.equal(s.sends.length,2);
+  for (const id of s.sends) assert.deepEqual(s.store.message(id),{conversation:'[T3 Bot]\nThe answer'});
+  assert.equal(s.errors.length,0);
 });
 test('ambiguous WhatsApp delivery is held for review rather than retried', async t=>{
   const s=setup(t);const task=s.queue('queued');s.store.setState(task.id,'completed');s.store.outgoing('out',task,'reply');

@@ -53,10 +53,10 @@ test('new resets only its chat and retains mapping; older results cannot steal i
   assert.equal(s.store.context('300@g.us')?.thread_id,'t2');
 });
 test('replying to an older bot response resumes that conversation after a reset',async t=>{
-  const s=setup(t);s.bridge.accept(own('old','@bot hi'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
-  s.finish();await s.bridge.collectResults();s.bridge.accept(own('reset','@bot new'),[owner]);
+  const s=setup(t);s.bridge.accept(own('old','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();const reply=s.store.pending()[0];
+  s.bridge.accept(own('reset','@bot new'),[owner]);
   s.bridge.accept(own('fresh','@bot another topic'),[owner]);await s.bridge.submitQueued();
-  s.bridge.accept(own('reply','what were we discussing?',ack.id),[owner]);await s.bridge.submitQueued();
+  s.bridge.accept(own('reply','what were we discussing?',reply.id),[owner]);await s.bridge.submitQueued();
   assert.equal(s.calls[2].thread,'t1');assert.equal(s.store.context(chat)?.thread_id,'t1');
 });
 test('thread names, todo requests and new-thread requests are forwarded as natural language',async t=>{
@@ -122,8 +122,8 @@ test('a settled conversation starts fresh while retaining the mapping hint and q
   assert.equal(s.store.context(chat)?.thread_id,'t2');
 });
 test('replying to a settled bot conversation starts fresh without sending to its old thread',async t=>{
-  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
-  s.finish();await s.bridge.collectResults();s.settle();s.bridge.accept(own('reply','explain more',ack.id),[owner]);await s.bridge.submitQueued();
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();const reply=s.store.pending()[0];
+  s.settle();s.bridge.accept(own('reply','explain more',reply.id),[owner]);await s.bridge.submitQueued();
   assert.equal(s.calls[1].thread,undefined);assert.equal(s.calls[1].project,'/general');
 });
 test('queued follow-ups share the replacement conversation when the old one is settled',async t=>{

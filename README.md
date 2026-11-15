@@ -40,7 +40,7 @@ Keep your computer awake, online, and T3 Code running.
 
 ## Usage
 
-Send commands in a chat, group, or **Message yourself**. Reply to an issue to include its text as context.
+Send commands in a chat, group, or **Message yourself**. Reply to an issue to include its text as context. The bot sends its answer directly, without an “I’m on it” acknowledgement.
 
 ```text
 @bot hi

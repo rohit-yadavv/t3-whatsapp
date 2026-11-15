@@ -15,8 +15,8 @@ test('other participants, broadcasts, channels, stale messages and bot echoes st
   const s=setup(t);assert.equal(s.bridge.accept({...own('other','@bot fix'),fromMe:false,sender:'999@s.whatsapp.net'},[owner]),false);
   for(const jid of ['status@broadcast','999@newsletter']) assert.equal(s.bridge.accept(own(jid,'@bot fix',undefined,jid),[owner]),false);
   assert.equal(s.bridge.accept({...own('old','@bot fix'),timestamp:1},[owner]),false);
-  s.bridge.accept(own('task','@bot explain'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
-  assert.equal(s.bridge.accept(own(ack.id,'@bot accidental echo'),[owner]),false);
+  s.bridge.accept(own('task','@bot explain'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();const reply=s.store.pending()[0];
+  assert.equal(s.bridge.accept(own(reply.id,'@bot accidental echo'),[owner]),false);
 });
 test('mapping commands persist across restart and supply context without starting agent turns',async t=>{
   const s=setup(t);s.bridge.accept(own('map','@bot use website for this chat'),[owner]);assert.equal(s.store.tasks('queued').length,0);s.restart();
@@ -38,9 +38,9 @@ test('unmapping overrides a configured mapping and survives restart',async t=>{
   s.bridge.accept(own('task','@bot explain'),[owner]);await s.bridge.submitQueued();assert.equal(data(s.calls[0].prompt).projectContext,undefined);
 });
 test('task references cannot expose another chat conversation',async t=>{
-  const s=setup(t);s.bridge.accept(own('first','@bot explain'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
-  assert.equal(s.bridge.accept(own('foreign','follow up',ack.id,'300@g.us'),[owner]),false);
-  s.bridge.accept(own('fresh','@bot explain',ack.id,'300@g.us'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,undefined);
+  const s=setup(t);s.bridge.accept(own('first','@bot explain'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();const reply=s.store.pending()[0];
+  assert.equal(s.bridge.accept(own('foreign','follow up',reply.id,'300@g.us'),[owner]),false);
+  s.bridge.accept(own('fresh','@bot explain',reply.id,'300@g.us'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,undefined);
 });
 test('a configured hint removed later does not discard an accepted conversation message',async t=>{
   const s=setup(t);s.bridge.accept(own('queued','@bot #website explain'),[owner]);
