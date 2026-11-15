@@ -12,29 +12,18 @@ Delegate tasks to T3 Code from existing chats and groups, using your own WhatsAp
 
 Requires Node.js 22.13+, pnpm 12.21.0, and T3 Code running locally with your projects registered and `t3` available on your PATH.
 
-1. Install dependencies and link your WhatsApp account:
+Install dependencies and open the guided local setup page:
 
-   ```sh
-   pnpm install --frozen-lockfile
-   pnpm pair
-   ```
+```sh
+pnpm install --frozen-lockfile
+pnpm setup
+```
 
-   Scan the QR image using WhatsApp → Linked devices. Once paired, stop pairing with Ctrl+C.
+The page checks T3, links WhatsApp with a live QR, saves account authorization automatically, and lets you choose chat access and history retention. New installations start with **Message yourself only** and **history off**. Existing installations keep their settings by default. You do not need to copy account identifiers or edit JSON.
 
-2. Create your local configuration:
+Start the bridge from the page and send `@bot hi` in WhatsApp. Keep the setup terminal running while testing; Ctrl+C stops its bridge. To run independently later, use `pnpm dev`.
 
-   ```sh
-   cp config.example.json config.json
-   ```
-
-   Set `allowedSenderJids` to the account identifiers printed during pairing. Keep `selfCommands` and `accountWide` enabled to use your own account across chats. Project aliases under `projects` are optional prompt hints.
-
-3. Check the configuration and start:
-
-   ```sh
-   pnpm run doctor
-   pnpm dev
-   ```
+**Setting up through T3 Code?** Ask it to “Set up T3 WhatsApp from this checkout.” See the [setup guide](SETUP.md) and [agent setup skill](skills/t3-whatsapp-setup/SKILL.md). Read-only diagnostics are available with `pnpm doctor --json`.
 
 Keep your computer awake, online, and T3 Code running.
 
@@ -55,7 +44,7 @@ Send commands in a chat, group, or **Message yourself**. Reply to an issue to in
 - A bare `@bot` gives a short greeting. Reply with just `@bot` to answer or discuss the quoted message; actions still need an explicit instruction.
 - Each new chat or group gets its own **No project** conversation. Later messages continue it, including after restart. If you settle that thread in T3, the next message starts a fresh No project conversation.
 - Ask for “the report here”, “attach it”, or “let me know when it finishes” to opt into WhatsApp delivery. Requested files are attached; local file paths are never presented as public links.
-- Text from personal chats and groups is kept locally for 30 days, including ordinary messages and bot replies. The agent retrieves relevant context on demand; history never triggers commands. Retention and retrieval limits are configurable in `config.json`. Available recent phone history is imported on a best-effort basis.
+- When history is enabled, text from enabled personal chats and groups is kept locally for the chosen retention period, including ordinary messages and bot replies. Guided setup starts with history off; manual configurations default to 30 days when history is omitted. The agent retrieves relevant context on demand; history never triggers commands. Retention and retrieval limits are configurable in `config.json`. Available recent phone history is imported on a best-effort basis.
 - Mention projects and thread titles naturally; the agent uses T3 tools to find them and perform your request.
 - `#project` and chat mappings add project context to the prompt. The conversation stays in No project.
 - Reply to an older bot message to continue its conversation, or send exactly `@bot new` to reset this chat.

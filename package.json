@@ -16,7 +16,9 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
     "test": "node --import tsx --test test/*.test.ts",
-    "doctor": "node --import tsx src/main.ts doctor",
+    "setup": "node --import tsx src/setup-cli.ts",
+    "doctor": "node --import tsx src/setup-cli.ts doctor",
+    "config:show": "node --import tsx src/setup-cli.ts config show",
     "history": "node --import tsx src/history-cli.ts"
   },
   "dependencies": {

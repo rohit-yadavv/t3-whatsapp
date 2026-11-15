@@ -125,6 +125,8 @@ Baileys uses WhatsApp's linked-device protocol without official Meta support. Ac
 
 ## Setup
 
+Use `pnpm setup` for the guided local browser flow, including automatic owner authorization and explicit access/history preferences. See [SETUP.md](../SETUP.md) for the full flow and agent-assisted setup. The commands below describe the manual alternative.
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm pair

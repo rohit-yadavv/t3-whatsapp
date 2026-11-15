@@ -38,6 +38,11 @@ const schema = z.object({
   if (new Set(config.routes.map(r=>r.chatJid)).size !== config.routes.length) ctx.addIssue({code:'custom',message:'Each chat must have exactly one configured mapping.'});
 });
 export type Config = z.infer<typeof schema>;
+export function validateConfig(value: unknown): Config {
+  const config = schema.parse(value);
+  projectCatalog(config);
+  return config;
+}
 export function historyOptions(config:Pick<Config,'history'>):HistoryOptions {return config.history ?? historySchema.parse({});}
 export function isSupportedChat(jid: string): boolean { return chatPattern.test(jid); }
 export function projectCatalog(config: Config): Map<string,string> {
@@ -57,8 +62,7 @@ export function projectCatalog(config: Config): Map<string,string> {
 }
 export function loadConfig(path = process.env.T3_WHATSAPP_CONFIG ?? 'config.json'): Config {
   const file=resolve(path);
-  const config=schema.parse(JSON.parse(readFileSync(file,'utf8')));
+  const config=validateConfig(JSON.parse(readFileSync(file,'utf8')));
   config.dataDir=resolve(dirname(file),config.dataDir);
-  projectCatalog(config);
   return config;
 }

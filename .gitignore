@@ -2,6 +2,7 @@ node_modules/
 dist/
 .data/
 config.json
+config.json.setup.tmp
 *.log
 .DS_Store
 

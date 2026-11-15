@@ -1,0 +1,11 @@
+# T3 WhatsApp
+
+> A local WhatsApp companion for T3 Code, using the owner's own account.
+
+- [Setup](SETUP.md): Canonical human and agent setup flow, JSON diagnostics, and recovery.
+- [Setup skill](skills/t3-whatsapp-setup/SKILL.md): Instructions for agents asked to install or configure this checkout.
+- [Usage](README.md): WhatsApp commands and requirements.
+- [Configuration](docs/configuration.md): History, project hints, delivery, and operational constraints.
+- [Project instructions](AGENTS.md): Repository contribution and safety invariants.
+
+Begin with pnpm doctor --json after dependencies are installed. Use pnpm setup for the local browser flow. Pairing, setup tokens, credentials, and conversation data stay private. Existing authorization and pending work must be preserved.

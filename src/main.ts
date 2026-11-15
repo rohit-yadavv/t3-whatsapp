@@ -17,6 +17,11 @@ import { chooseVersion, disconnectAction, streamErrorReason } from './connection
 import { pairingQrPng } from './pairing-qr.js';
 
 process.umask(0o077);
+// Setup uses the existing runtime over private IPC, never terminal-log parsing.
+const setupManaged = Boolean(process.send);
+function setupEvent(event: string, details: Record<string, unknown> = {}) {
+  if (process.connected) process.send?.({event, ...details}, () => {});
+}
 const pairingOnly = process.argv[2] === 'pair';
 const config: Config = pairingOnly ? {
   t3Binary:'t3', dataDir:resolve(process.env.T3_WHATSAPP_DATA_DIR ?? '.data'),
@@ -79,6 +84,7 @@ if (process.argv[2] === 'doctor') {
       quoted:quote as WAMessage, messageId:outgoing.id,
     });
     if (!result) throw new Error('WhatsApp did not confirm the send.');
+    setupEvent('reply-sent');
     try{history?.capture(result);}catch(e){error(e);}
     return result.message ?? {};
   }, error);
@@ -88,6 +94,7 @@ if (process.argv[2] === 'doctor') {
   }
   process.on('SIGINT', () => { void shutdown(); });
   process.on('SIGTERM', () => { void shutdown(); });
+  if (setupManaged) process.on('disconnect', () => { void shutdown(); });
   process.on('uncaughtException', e => { error(e); void shutdown(1); });
   process.on('unhandledRejection', e => { error(e); void shutdown(1); });
   const { state, saveCreds } = await useMultiFileAuthState(join(config.dataDir, 'auth'));
@@ -98,6 +105,7 @@ if (process.argv[2] === 'doctor') {
     const record = {time:new Date().toISOString(),event,...details};
     appendFileSync(join(config.dataDir, 'connection.ndjson'), JSON.stringify(record)+'\n', {mode:0o600});
     console.log(`[WhatsApp] ${event}`, JSON.stringify(details));
+    setupEvent(event, details);
   }
   const bundledVersion = DEFAULT_CONNECTION_CONFIG.version;
   let version = bundledVersion;
@@ -130,16 +138,17 @@ if (process.argv[2] === 'doctor') {
       if (update.qr) {
         diagnostic('qr-ready');
         console.log('Scan locally using the bot account: WhatsApp → Linked devices → Link a device. Keep this QR private.');
-        qr.generate(update.qr, {small:true});
+        if (!setupManaged) qr.generate(update.qr, {small:true});
         const sequence = ++qrSequence;
         void pairingQrPng(update.qr).then(png => {
           if (stopped || connected || current !== socket || sequence !== qrSequence) return;
           const temporary = qrImage + '.tmp';
           writeFileSync(temporary, png, {mode:0o600});
           renameSync(temporary, qrImage);
+          setupEvent('setup-qr', {png:png.toString('base64')});
           console.log(`Full-size QR image: ${qrImage}`);
           console.log('Scan the image in Preview, rather than the terminal blocks. Use the newest QR; keep pairing running.');
-          if (pairingOnly && process.platform === 'darwin' && !qrOpened) {
+          if (pairingOnly && !setupManaged && process.platform === 'darwin' && !qrOpened) {
             qrOpened = true;
             const viewer = spawn('open', [qrImage], {stdio:'ignore'});
             viewer.on('error', () => console.error(`Open the QR image manually: ${qrImage}`));
@@ -156,6 +165,14 @@ if (process.argv[2] === 'doctor') {
         console.log('WhatsApp connected. Only configured groups and authorized senders can start tasks.');
         if (config.selfCommands) console.log(config.accountWide ? 'Account-wide mode: use @bot #project-name followed by a task in any personal chat, group, or Message yourself.' : 'Single-account mode: type @bot followed by a task in your configured chat.');
         if (pairingOnly) {
+          if (setupManaged) {
+            credentialsSaved=credentialsSaved.then(saveCreds);
+            void credentialsSaved.then(() => {
+              setupEvent('setup-paired');
+              void shutdown();
+            }).catch(e => { error(e); void shutdown(1); });
+            return;
+          }
           console.log('Bot identifiers:', [current.user?.id, current.user?.lid].filter(Boolean).map(id=>jidNormalizedUser(id!)).join(', '));
           void current.groupFetchAllParticipating().then(groups => {
             console.log('Joined groups (private local setup output):');
@@ -209,6 +226,7 @@ if (process.argv[2] === 'doctor') {
         if (message.timestamp>=startedAtSeconds && !store.isOutgoing(message.group,message.id))void history?.requestRecent(raw,(count,key,timestamp)=>current.fetchMessageHistory(count,key,timestamp));
         if (!shouldHandleUpsert(event.type, message, config.selfCommands, startedAtSeconds)) continue;
         const accepted = bridge.accept(message, ids);
+        if (accepted) setupEvent('command-accepted');
         acceptedAny ||= accepted;
         if (isSupportedChat(message.group) && (config.accountWide || config.routes.some(route => route.chatJid === message.group)) && (accepted || hasSelfPrefix(message.text) || store.isOutgoing(message.group,message.quotedId))) {
           diagnostic('command-check', {accepted, fromMe:message.fromMe, hasPrefix:hasSelfPrefix(message.text), type:event.type});

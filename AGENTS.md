@@ -6,3 +6,7 @@
 - Make focused commits as verified work progresses.
 - Keep session credentials, QR images, local config, runtime data, and logs out of Git.
 - Preserve own-account authorization, bot echo suppression, task/thread continuity, and conservative recovery for ambiguous external side effects.
+
+## Installing or configuring the bot
+
+Read [SETUP.md](SETUP.md) and the [setup skill](skills/t3-whatsapp-setup/SKILL.md) when asked to set up this checkout. Use the shared setup commands and JSON diagnostics; preserve existing sessions and pending work.
