@@ -57,14 +57,6 @@ Send commands in a chat, group, or **Message yourself**. Reply to an issue to in
 
 **Only your own account can issue commands. Replies appear in the same chat, visible to its members.** Use Message yourself for private conversations. Permission requests must be answered in T3 Code.
 
-## Notes
-
-This is an unofficial integration using [Baileys](https://github.com/WhiskeySockets/Baileys); WhatsApp changes or account restrictions can interrupt it. Agent usage counts toward your configured provider's allowance or API billing.
-
-Text messages only. Keep `config.json` and `.data/` private; they contain configuration, session credentials, and conversation data.
-
-See the [configuration and reference guide](docs/configuration.md) for all commands, troubleshooting, and current limitations. Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## License
 
 [MIT](LICENSE) © 2026 Rohit Yadav.
