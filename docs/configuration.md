@@ -2,48 +2,48 @@
 
 **Your WhatsApp companion for T3 Code.**
 
-From your existing WhatsApp account, type `@bot` followed by a message in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Use `#project-name` when a conversation belongs to a codebase and `~thread-name` to find an existing T3 thread.
+From your existing WhatsApp account, type `@bot` followed by a message in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Mention projects and thread titles in ordinary language; T3 handles discovery and the requested action.
 
-A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Conversational answers come from your T3 agent and use its configured provider allowance or API billing. Routing, acknowledgements, and chat commands use ordinary code without separate AI calls.
+A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Conversational answers and project/thread actions come from your T3 agent and use its configured provider allowance or API billing. Authentication, conversation delivery, acknowledgements, and mapping commands use ordinary code without separate AI calls.
 
-## Conversations and projects
+## One conversation per chat
 
-A fresh, unmapped conversation starts in **No project**. The bot never shows a project selector or guesses a project from ordinary words in your message. A project is selected only through an explicit `#project-name` or a saved chat mapping. An invalid explicit selector produces an error without starting work.
+The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. This is a remembered conversation, not a continuously running agent. Different chats do not share bridge conversation state.
 
-Once selected, the active project and thread are remembered for that chat, including after restart. A later `@bot` message continues that conversation. An explicit hashtag overrides the active project; it does not change the saved mapping. Replies to bot task updates keep that task's original project and thread. If such a reply explicitly selects another project, the bot asks whether to create a new task instead.
+Replying to an older bot acknowledgement or result continues the conversation that produced it and makes that conversation active in the same chat again. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
 
-For fresh conversations the order is an explicit hashtag, then the chat mapping, then No project. Existing conversation context is reused until you change it or send `@bot new`. Quoted issue text never controls project selection. Project aliases match `config.json` case-insensitively; put the selector immediately after `@bot`.
+The assistant uses T3's tools to discover projects, find threads by title, read relevant context, forward messages, or create threads when requested. There is no bridge thread selector, title regex, numbered selection menu, or thread configuration. If the requested destination is ambiguous, the agent can ask you to clarify.
+
+```text
+@bot hi
+@bot add this to my todo thread in Diskovalist
+@bot #website ask the Launch planning thread what remains to do
+@bot create a research thread in the WhatsApp bot project
+@bot what did you find?
+@bot new
+```
+
+## Project context and mappings
+
+Every assistant conversation starts and remains in No project, even when a hashtag or mapping is present. A `#project-name` adds project context to the prompt. Known aliases are resolved to paths or IDs from `config.json`; unknown names are passed to T3 for discovery. Your instruction stays intact. Quoted text cannot select a project hint.
+
+An explicit hashtag takes precedence over the chat mapping for that message. Without a hashtag, the mapping is included as default context; without either, the agent receives only your request and conversation history. A hint is not a workspace switch or permission grant. Plain-language requests can name projects directly, without adding them to the bridge catalog.
 
 | Command | Result |
 | --- | --- |
-| `@bot hi` | Start or continue a conversation; an unmapped fresh chat uses No project |
-| `@bot #website investigate this` | Select `website` and send the instruction |
-| `@bot #website` | Focus that project without starting an agent turn |
-| `@bot what did you find?` | Continue this chat's active conversation |
-| `@bot new` | Clear active context; the next command uses the mapping or No project |
-| `@bot #website new investigate this` | Start a fresh thread in `website` |
-| `@bot #no-project research this idea` | Explicitly switch to No project |
-| `@bot use website for this chat` | Save a mapping and clear the previous active context |
-| `@bot unmap this chat` | Clear the mapping and active context, including a configured fallback |
-| `@bot projects` | List configured project aliases without an agent turn |
+| `@bot #website investigate this` | Send the instruction with the resolved website hint to this chat's No project conversation |
+| `@bot use website for this chat` | Save a default project hint without resetting the conversation |
+| `@bot unmap this chat` | Clear the default hint, including a configured fallback, without resetting the conversation |
+| `@bot projects` | List configured hint aliases without an agent turn |
+| `@bot new` | Reset this chat's conversation; retain its mapping |
 
-No project conversations use T3's registered scratch workspace. Their prompt asks the agent to discuss or research your request without demanding a project choice. This is a conversational instruction, not a separate permission boundary; T3's configured agent permissions still apply.
+Initial mappings live in private `config.json` under `routes`. Mappings saved by chat commands live in `.data/bridge.sqlite` and override the file entry. Restart after changing the configuration file. The `projects` catalog is optional shorthand for hints; it does not limit the projects the agent can discover through T3.
 
-## Existing threads and todos
+## Todos and results from other threads
 
-Use `~todo` or `~"Launch planning"` to find an existing thread within the selected project. Names match case-insensitively, first exactly, then with spaces/hyphens/underscores normalized, then by literal partial title. User-supplied regular expressions are not executed. Ordinary words and quoted text do not select threads.
+Reply to an issue with `@bot #website add this to my todo thread`. The assistant finds the requested destination through T3 and follows that thread's established workflow. Saving an item does not ask the agent to implement it. There is no bridge todo parser or separate todo database.
 
-```text
-@bot #website ~todo save this for later
-@bot #website ~"Launch planning" what remains to do?
-@bot #website threads
-```
-
-Reply to an issue with the first command to save its quoted text in your todo thread. Capture requests such as “save this” instruct the agent to record the item in that conversation without implementing it, running commands, or creating an external todo file. Later, ask `@bot show pending todos` or `@bot pick up the checkout issue` in that same conversation. The thread is your todo store; there is no separate todo application.
-
-If several threads match, the bot offers numbered **thread** choices. Reply with a number, another `~name`, or `cancel`; the original instruction and quote are retained across restart. If none match, correct the name or create the thread in T3 Code first. Named thread selectors do not create threads automatically. `@bot #website threads` lists up to ten threads; selecting one only focuses it, without an agent turn. `@bot #website ~todo` also focuses a matching thread without sending a task.
-
-Selected names are remembered as aliases to thread IDs, scoped to their project, so a renamed thread remains addressable by that name. The bot verifies that the thread still exists before dispatching an explicit selector. A selector on a reply to a bot task cannot silently redirect that task to another thread; use a fresh command to switch.
+The bridge relays responses from its No project assistant conversation. If you request a completed result from work in another thread, the prompt tells the assistant to follow T3's orchestration instructions to wait for and relay that result. If you only request creation or forwarding, it should confirm that action accurately. The bridge does not independently subscribe to every thread the agent mentions or promise automatic future updates. Permission requests still need an answer in T3 Code.
 
 **Responses are posted in the chat where you sent the command.** Everyone in that chat can see them. Use Message yourself when the task or result should stay private.
 
@@ -78,13 +78,12 @@ Edit these fields:
 - `selfCommands`: `true` for typed `@bot` commands from the paired account.
 - `accountWide`: `true` to accept your own commands in personal chats, groups, and Message yourself. This requires `selfCommands: true`. Status broadcasts and channels are excluded.
 - `allowedSenderJids`: the paired account identifiers printed during pairing. Remove all example values. At least one must match the connected account.
-- `projects`: project aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. The catalog is explicit; it does not automatically discover newly added T3 projects.
-- `noProject`: the registered T3 No project workspace path or ID. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The reserved alias `#no-project` points here.
-- `rememberContext`: defaults to enabled. Set `false` to stop reusing active conversations for unquoted commands; explicit selectors and mappings still work.
+- `projects`: optional shorthand aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. Hashtags add these targets to the prompt; T3 can discover other projects by name.
+- `noProject`: the registered T3 No project workspace path or ID used for every assistant conversation. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The legacy `rememberContext` field is accepted for compatibility but ignored; per-chat continuity is always enabled.
 - `routes`: optional initial chat mappings, for example `{"chatJid":"CHAT_ID","project":"PROJECT_PATH_OR_ID"}`. Account-wide mode does not require any routes. Saved `use ... for this chat` commands override configured mappings.
 - `dataDir`: session and database directory, relative to the config file. Default `.data` matches pairing mode when run from this folder. For another pairing directory use `T3_WHATSAPP_DATA_DIR=/absolute/path pnpm pair`.
 
-Keep config and session data private. They are gitignored. The bridge inherits each target project's default model and permissions in T3 Code.
+Keep config and session data private. They are gitignored. New assistant threads inherit the No project workspace's default model and permissions in T3 Code. T3 handles the settings for any project work the assistant starts.
 
 ```sh
 pnpm run doctor
@@ -95,7 +94,7 @@ Use `pnpm run doctor`: plain `pnpm doctor` runs pnpm's own diagnostics. The proj
 
 ## First task
 
-In any personal chat, group, or Message yourself, send `@bot hi` for a No project conversation, or select a project explicitly:
+In any personal chat, group, or Message yourself, send `@bot hi`, or provide a project hint:
 
 ```text
 @bot #website Explain this project briefly. Don't change any files.
@@ -103,7 +102,7 @@ In any personal chat, group, or Message yourself, send `@bot hi` for a No projec
 
 Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `[T3 Bot]`, because commands and replies use your number. Reply to an acknowledgement or result to continue that task; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
 
-Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Existing queued work and pending choices are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
+Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Accepted conversation messages and replies are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
 
 Keep the Mac awake, online, and T3 Code running. This version runs in the foreground. If T3 asks a question or needs permission, answer in T3 Code; typing “yes” in WhatsApp never approves a permission prompt.
 
@@ -111,19 +110,23 @@ Keep the Mac awake, online, and T3 Code running. This version runs in the foregr
 
 Set `accountWide: false` to restrict the bridge to chats listed in `routes`. With `selfCommands: false`, use a separate personal sender and bot number, allowlist your personal sender IDs, and select the bot contact from the mention picker for new tasks. Plain typed `@bot` is insufficient in that mode.
 
-Old configs containing `routes[].groupJid` are read as `chatJid` mappings. If `projects` is absent, simple aliases are derived from route project folder names. New configurations should define the catalog explicitly.
+Old configs containing `routes[].groupJid` are read as `chatJid` mappings. If `projects` is absent, simple aliases are derived from route project folder names. New configurations can define hint aliases explicitly or leave the catalog empty.
 
 ## Recovery and privacy
 
 Only one bridge instance may use a data directory. Stop `pnpm pair` before starting `pnpm dev`. Normal shutdown releases `.data/run.lock`. If the process crashed, confirm the PID in that file has stopped before removing the lock.
 
-Ambiguous T3 submissions and WhatsApp sends are held for review rather than automatically repeated, because the external operation may already have succeeded. Removing a project from the catalog holds its persisted work and replies for review. Chat mapping changes clear active context for subsequent commands; replies to existing bot tasks retain their original project. Restricted-mode configured route changes retain conservative recovery for old work.
+Ambiguous T3 submissions and WhatsApp sends are held for review rather than automatically repeated, because the external operation may already have succeeded. Changing hint aliases or mappings does not move or discard a conversation. Removing a chat from restricted-mode routes blocks its persisted work and replies. Changing the No project workspace holds work tied to the previous workspace for review.
 
 If an existing T3 thread advances to another run in the desktop app, the bot asks you to review there rather than sending an unrelated answer. Long results are split and capped; the full result remains in T3 Code. Shutdown stops further submissions and waits up to ten seconds for in-flight bridge operations and credential writes. Unfinished side effects require review on restart.
 
-`.data/bridge.sqlite` stores accepted requests, quoted context, chat mappings, active conversations, thread aliases, pending thread choices, and replies in plaintext with no automatic retention cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
+`.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, active conversations, and replies in plaintext with no automatic retention cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
 
 New files are restricted to your Mac user. The prototype uses Baileys's multi-file auth helper; a transactional auth store is future work. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
+
+### Upgrading from native project/thread selection
+
+Older bot conversations remain in T3 history, but new commands start a fresh No project conversation rather than resuming an old project-bound or selector-managed thread. Legacy queued requests are held for review instead of replayed under changed semantics. Old project/thread choice prompts are superseded. Existing message IDs are retained to prevent duplicates and echo loops. Old unused database tables are left intact; new conversations do not use them. Resend any request that was waiting on an old selector prompt as a fresh `@bot` message.
 
 ### Linking or connection problems
 
@@ -141,9 +144,9 @@ pnpm test
 pnpm build
 ```
 
-`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, No project fallback, explicit project selection, conversation memory, named threads, todo capture prompts, durable choices, mappings, task continuity, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
+`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
-Text tasks only. Attachments, voice transcription, remote permission approvals, worktree selection, private cross-chat result routing, automatic project discovery, and a macOS background service are not implemented. Thread choices and mapping commands use no extra AI calls. Todo capture relies on agent instructions and the thread history, without a separate structured todo database.
+Text tasks only. Attachments, voice transcription, remote permission approvals, private cross-chat result routing, and a macOS background service are not implemented. Project/thread discovery and work delegation depend on the T3 tools available to the chosen agent. There is no bridge configuration for worktrees or subscriptions to other threads. Mapping commands use no extra AI calls.
 
 ## Contributing and references
 
