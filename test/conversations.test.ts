@@ -63,7 +63,7 @@ test('thread names, todo requests and new-thread requests are forwarded as natur
   const s=setup(t);const instruction='create a thread in Diskovalist and add this to my Launch planning thread';
   s.bridge.accept(own('natural','@bot '+instruction,'issue',chat,'Improve the logo'),[owner]);await s.bridge.submitQueued();
   assert.equal(data(s.calls[0].prompt).instruction,instruction);assert.equal(data(s.calls[0].prompt).quotedContext,'Improve the logo');
-  assert.match(s.calls[0].prompt,/available T3 tools/);assert.match(s.calls[0].prompt,/wait for and relay/);
+  assert.match(s.calls[0].prompt,/available T3 tools/);assert.match(s.calls[0].prompt,/Default delivery is T3/);
   assert.doesNotMatch(s.calls[0].prompt,/Capture-only|in THIS conversation|Only an explicit/);
   s.finish();await s.bridge.collectResults();s.bridge.accept(own('literal','@bot ~"Launch planning" save this for later'),[owner]);await s.bridge.submitQueued();
   assert.equal(data(s.calls[1].prompt).instruction,'~"Launch planning" save this for later');

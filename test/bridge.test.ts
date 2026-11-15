@@ -18,7 +18,7 @@ class FakeT3 implements T3 {
   calls: {project:string;prompt:string;thread?:string}[] = [];
   snapshot: Snapshot = {thread:{threadId:'t1',status:'running',latestRunId:'r1',settled:false,pendingRequestCount:0},messages:[]};
   async submit(project:string,prompt:string,thread?:string) { this.calls.push({project,prompt,thread}); return {threadId:thread ?? 't1',runId:'r'+this.calls.length}; }
-  async show() { return this.snapshot; }
+  async show() {return {...this.snapshot,messages:this.snapshot.messages.map(m=>m.role==='assistant' ? {...m,text:JSON.stringify({v:1,kind:'reply',text:m.text})} : m)};}
 }
 function setup(t: TestContext, settings: Config = config) {
   const dir = mkdtempSync(join(tmpdir(),'t3-wa-'));
@@ -166,7 +166,7 @@ test('a second waiting episode produces a fresh notice after the thread resumes'
 });
 test('changing a group mapping updates prompt context without moving its conversation', async t => {
   const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();
-  t3.snapshot.thread.status='completed';await bridge.collectResults();const reply=store.pending()[0];
+  t3.snapshot.thread.status='completed';t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'Done'}];await bridge.collectResults();const reply=store.pending()[0];
   const changed=new Bridge({...config,routes:[{chatJid:group,project:'/other-project'}]},store,t3,()=>{});
   changed.accept(message('reply',{quoted:reply.id,mention:false,text:'explain more'}),[bot]);
   t3.snapshot.thread.status='completed';await changed.collectResults();await changed.submitQueued();

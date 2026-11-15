@@ -1,13 +1,17 @@
 import { DatabaseSync } from 'node:sqlite';
 import { BufferJSON } from '@whiskeysockets/baileys';
+import {dirname,resolve,join} from 'node:path';
+import type {Document,Handoff} from './responses.js';
 import type { Incoming } from './messages.js';
 
 export interface Task { id: string; group_jid: string; message_id: string; project: string; thread_id: string | null; run_id: string | null; state: string; payload: string; notice: string | null }
 export interface ChatContext { project: string; thread_id: string | null; task_id: string | null }
-export interface Outgoing { id: string; group_jid: string; task_id: string; text: string; quote: string; state: string }
+export interface Outgoing { id: string; group_jid: string; task_id: string; text: string; quote: string; state: string; document:string|null }
 export class Store {
   readonly db: DatabaseSync;
+  readonly directory:string;
   constructor(path: string, recover = true) {
+    this.directory=dirname(resolve(path));
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS tasks (
@@ -22,6 +26,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS tasks_thread_project ON tasks(thread_id, group_jid, project);
       CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state);
     `);
+    if (!this.db.prepare('PRAGMA table_info(outbox)').all().some(column=>column.name==='document')) this.db.exec('ALTER TABLE outbox ADD COLUMN document TEXT');
     // A process could have died after an external side effect. Never blindly repeat it.
     if (recover) this.db.exec("UPDATE tasks SET state='review' WHERE state='submitting'; UPDATE outbox SET state='review' WHERE state='sending'; UPDATE outbox SET state='superseded' WHERE state='pending' AND task_id IN (SELECT id FROM tasks WHERE state IN ('awaiting_project','awaiting_thread','awaiting_new_task')); UPDATE tasks SET state='superseded' WHERE state IN ('awaiting_project','awaiting_thread','awaiting_new_task');");
   }
@@ -48,6 +53,11 @@ export class Store {
     this.db.prepare('UPDATE chat_context SET thread_id=? WHERE chat_jid=? AND task_id=?').run(thread,task.group_jid,task.id);
   }
   attachThread(id: string, thread: string | null) { this.db.prepare('UPDATE tasks SET thread_id=? WHERE id=?').run(thread,id); }
+  outputDirectory(id:string):string {return join(this.directory,'deliveries',id);}
+  setPayload(id:string,payload:unknown) {this.db.prepare('UPDATE tasks SET payload=? WHERE id=?').run(JSON.stringify(payload,BufferJSON.replacer),id);}
+  recentHandoffs(chat:string):Handoff[] {
+    return this.db.prepare("SELECT payload FROM tasks WHERE group_jid=? AND json_type(payload,'$.handoff')='object' ORDER BY rowid DESC LIMIT 5").all(chat).map(row=>JSON.parse(row.payload as string,BufferJSON.reviver).handoff);
+  }
   isOutgoing(group: string, id?: string): boolean {
     return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE group_jid=? AND id=?').get(group, id));
   }
@@ -66,9 +76,9 @@ export class Store {
     this.db.prepare("UPDATE tasks SET state='running',thread_id=?,run_id=? WHERE id=?").run(thread, run, task.id);
   }
   notice(id: string, notice: string | null) { this.db.prepare('UPDATE tasks SET notice=? WHERE id=?').run(notice, id); }
-  outgoing(id: string, task: Task, text: string) {
+  outgoing(id: string, task: Task, text: string, document?:Document) {
     const m = JSON.parse(task.payload, BufferJSON.reviver) as Incoming;
-    this.db.prepare("INSERT INTO outbox VALUES (?,?,?,?,?,'pending')").run(id, task.group_jid, task.id, text, JSON.stringify(m.raw, BufferJSON.replacer));
+    this.db.prepare("INSERT INTO outbox (id,group_jid,task_id,text,quote,state,document) VALUES (?,?,?,?,?,'pending',?)").run(id,task.group_jid,task.id,text,JSON.stringify(m.raw,BufferJSON.replacer),document ? JSON.stringify(document) : null);
   }
   pending(): Outgoing[] { return this.db.prepare("SELECT * FROM outbox WHERE state='pending' ORDER BY rowid").all() as unknown as Outgoing[]; }
   sentState(id: string, state: string) { this.db.prepare('UPDATE outbox SET state=? WHERE id=?').run(state, id); }

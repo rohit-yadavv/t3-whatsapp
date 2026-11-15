@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import {mkdirSync} from 'node:fs';
+import {parseResponse,prepareDocuments,whatsappText,type Handoff,type Completion} from './responses.js';
 import { BufferJSON } from '@whiskeysockets/baileys';
 import {isSupportedChat, projectCatalog, type Config} from './config.js';
 import {parseProjectCommand, type ProjectContext} from './projects.js';
@@ -7,7 +9,7 @@ import { Store, type Task } from './store.js';
 import type { T3 } from './t3.js';
 
 // Versioned payloads prevent old routing requests from being replayed under new semantics.
-type TaskMessage = Incoming & {bridgeVersion:2; projectContext?:ProjectContext; continueTaskId?:string};
+type TaskMessage = Incoming & {bridgeVersion:2; projectContext?:ProjectContext; continueTaskId?:string;responseContract?:1;handoff?:Handoff;completion?:Completion};
 
 export class Bridge {
   private projects: Map<string,string>;
@@ -105,7 +107,7 @@ export class Bridge {
       const message = JSON.parse(task.payload, BufferJSON.reviver) as TaskMessage;
       if (message.continueTaskId) {
         const parent=this.store.task(message.continueTaskId);
-        if (!this.conversationTask(parent) || parent.group_jid!==task.group_jid || !['queued','submitting','running','completed','stopped'].includes(parent.state)) {
+        if (!this.conversationTask(parent) || parent.group_jid!==task.group_jid || !['queued','submitting','running','completed','stopped','waiting_work','work_review'].includes(parent.state)) {
           this.store.atomic(()=>{this.store.setState(task.id,'review');this.enqueue(task,'I could not safely resume the earlier conversation. Check T3 Code before retrying, or send @bot new to start fresh.');});
           continue;
         }
@@ -132,9 +134,13 @@ export class Bridge {
           continue;
         }
       }
+      message.responseContract=1;
+      const outputDirectory=this.store.outputDirectory(task.id);
+      mkdirSync(outputDirectory,{recursive:true,mode:0o700});
+      this.store.setPayload(task.id,message);
       this.store.setState(task.id, 'submitting');
       try {
-        const result = await this.t3.submit(this.config.noProject,taskPrompt(message,this.config.selfCommands,message.text,message.projectContext),task.thread_id ?? undefined);
+        const result = await this.t3.submit(this.config.noProject,taskPrompt(message,this.config.selfCommands,message.text,message.projectContext,{outputDirectory,recentHandoffs:this.store.recentHandoffs(task.group_jid),completion:message.completion}),task.thread_id ?? undefined);
         task.thread_id = result.threadId;
         this.store.atomic(() => {
           this.store.submitted(task, result.threadId, result.runId);
@@ -151,7 +157,79 @@ export class Bridge {
       await afterSubmit();
     }
   }
+  private async deliverResponse(task:Task,text:string|undefined,shouldContinue:()=>boolean) {
+    const payload=JSON.parse(task.payload,BufferJSON.reviver) as TaskMessage;
+    // Previously accepted runs can still finish during an upgrade.
+    if (!payload.responseContract) {
+      this.store.atomic(()=>{this.enqueue(task,whatsappText(text || 'Task finished. Open T3 Code to review the result.'));this.store.setState(task.id,'completed');});
+      return;
+    }
+    try {
+      const response=parseResponse(text ?? '');
+      if (response.kind==='handoff') {
+        if (payload.completion || response.work.threadId===task.thread_id) throw new Error('Invalid handoff destination.');
+        const work=await this.t3.show(response.work.threadId);
+        if (!shouldContinue()) return;
+        if (work.thread.latestRunId!==response.work.runId) throw new Error('Handoff run could not be confirmed.');
+        payload.handoff={work:response.work,delivery:response.delivery};
+        this.store.atomic(()=>{
+          this.store.setPayload(task.id,payload);
+          this.enqueue(task,whatsappText(response.text));
+          this.store.setState(task.id,response.delivery==='whatsapp' ? 'waiting_work' : 'completed');
+        });
+      } else {
+        const documents=prepareDocuments(this.store.outputDirectory(task.id),response.files);
+        this.store.atomic(()=>{
+          this.enqueue(task,whatsappText(response.text));
+          for (const document of documents) this.store.outgoing('3EB0'+randomBytes(16).toString('hex').toUpperCase(),task,'',document);
+          this.store.setState(task.id,'completed');
+        });
+      }
+    } catch(error) {
+      this.logError(error);
+      this.store.atomic(()=>{
+        this.store.setState(task.id,'review');
+        this.enqueue(task,'I could not safely prepare the WhatsApp reply. Check T3 Code before retrying; work may already have started there.');
+      });
+    }
+  }
+  private async collectRequestedResults(shouldContinue:()=>boolean) {
+    for (const task of this.store.tasks('waiting_work')) {
+      if (!shouldContinue()) break;
+      if (!this.isRouted(task)) {this.store.setState(task.id,'work_review');continue;}
+      const payload=JSON.parse(task.payload,BufferJSON.reviver) as TaskMessage;
+      const handoff=payload.handoff;
+      if (!handoff || handoff.delivery!=='whatsapp') {this.store.setState(task.id,'work_review');continue;}
+      try {
+        const snapshot=await this.t3.show(handoff.work.threadId);
+        if (!shouldContinue()) break;
+        const thread=snapshot.thread;
+        if (thread.latestRunId!==handoff.work.runId) {
+          this.store.atomic(()=>{this.store.setState(task.id,'work_review');this.enqueue(task,'The requested work advanced in T3. Please review it there; I could not match its result safely.');});
+          continue;
+        }
+        if (thread.pendingRequestCount>0 || thread.status==='waiting') {
+          if (task.notice!=='work_waiting') this.store.atomic(()=>{this.store.notice(task.id,'work_waiting');this.enqueue(task,'The requested work needs your input or approval in T3 Code.');});
+          continue;
+        }
+        if (task.notice==='work_waiting') this.store.notice(task.id,null);
+        if (!['idle','completed','failed','cancelled','interrupted','rolled_back'].includes(thread.status)) continue;
+        const result=snapshot.messages.findLast(m=>m.role==='assistant' && m.runId===handoff.work.runId)?.text;
+        if (!['idle','completed'].includes(thread.status) || !result) {
+          this.store.atomic(()=>{this.store.setState(task.id,'work_review');this.enqueue(task,'The requested work did not produce a confirmed result. Please review it in T3 Code.');});
+          continue;
+        }
+        const completion:Completion={originalInstruction:payload.text,work:handoff.work,result:result.slice(0,24000)};
+        const delivery:TaskMessage={...payload,id:`delivery:${task.id}`,text:payload.text,continueTaskId:task.id,handoff:undefined,completion};
+        this.store.atomic(()=>{
+          this.store.add(randomUUID(),delivery,this.config.noProject,task.thread_id ?? undefined);
+          this.store.setState(task.id,'completed');
+        });
+      } catch(error) {this.logError(error);}
+    }
+  }
   async collectResults(shouldContinue = () => true) {
+    await this.collectRequestedResults(shouldContinue);
     for (const task of this.store.tasks('running')) {
       if (!shouldContinue()) break;
       if (!this.isRouted(task)) {
@@ -183,10 +261,9 @@ export class Bridge {
         if (['idle','completed','failed','cancelled','interrupted','rolled_back'].includes(thread.status)) {
           const reply = snapshot.messages.findLast(m => m.role === 'assistant' && m.runId === task.run_id)?.text;
           const ok = thread.status === 'completed' || thread.status === 'idle';
-          this.store.atomic(() => {
-            this.enqueue(task, ok ? (reply || 'Task finished. Open T3 Code to review the result.') : `Task stopped (${thread.status}). Please review it in T3 Code.`);
-            this.store.setState(task.id, ok ? 'completed' : 'stopped');
-          });
+          if (!ok) {
+            this.store.atomic(()=>{this.enqueue(task,`Task stopped (${thread.status}). Please review it in T3 Code.`);this.store.setState(task.id,'stopped');});
+          } else await this.deliverResponse(task,reply,shouldContinue);
         }
       } catch (error) { this.logError(error); }
     }

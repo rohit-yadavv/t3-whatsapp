@@ -9,6 +9,7 @@ import { hasSelfPrefix, normalize, shouldHandleUpsert } from './messages.js';
 import { Store } from './store.js';
 import { T3Cli, command } from './t3.js';
 import { Bridge } from './bridge.js';
+import {documentContent,type Document} from './responses.js';
 import { Worker } from './worker.js';
 import { chooseVersion, disconnectAction, streamErrorReason } from './connection.js';
 import { pairingQrPng } from './pairing-qr.js';
@@ -66,7 +67,8 @@ if (process.argv[2] === 'doctor') {
   let credentialsSaved: Promise<void> = Promise.resolve();
   const worker = new Worker(bridge, store, () => !pairingOnly && connected && !stopped, async (outgoing, quote) => {
     if (!socket) throw new Error('WhatsApp is disconnected.');
-    const result = await socket.sendMessage(outgoing.group_jid, {text:outgoing.text}, {
+    const content=outgoing.document ? documentContent(JSON.parse(outgoing.document) as Document) : {text:outgoing.text};
+    const result = await socket.sendMessage(outgoing.group_jid, content, {
       quoted:quote as WAMessage, messageId:outgoing.id,
     });
     if (!result) throw new Error('WhatsApp did not confirm the send.');

@@ -27,7 +27,7 @@ export function setup(t:TestContext,settings:Config=config) {
     },
     show:async thread=>{
       const call=calls.findLast(c=>c.threadId===thread);
-      return {thread:{threadId:thread,status:status.get(thread) ?? 'running',latestRunId:call?.runId ?? 'external',settled:settled.has(thread),pendingRequestCount:0},messages:call ? [{role:'assistant',runId:call.runId,text:'AI response'}] : []};
+      return {thread:{threadId:thread,status:status.get(thread) ?? 'running',latestRunId:call?.runId ?? 'external',settled:settled.has(thread),pendingRequestCount:0},messages:call ? [{role:'assistant',runId:call.runId,text:JSON.stringify({v:1,kind:'reply',text:'AI response'})}] : []};
     },
   };
   let bridge=new Bridge(settings,store,t3,e=>errors.push(e));
