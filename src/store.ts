@@ -15,6 +15,7 @@ export class Store {
         payload TEXT NOT NULL, notice TEXT, UNIQUE(group_jid, message_id));
       CREATE TABLE IF NOT EXISTS links (group_jid TEXT, message_id TEXT, thread_id TEXT NOT NULL, PRIMARY KEY(group_jid,message_id));
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, group_jid TEXT, task_id TEXT, text TEXT, quote TEXT, state TEXT);
+      CREATE TABLE IF NOT EXISTS chat_mappings (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sent_messages (id TEXT PRIMARY KEY, content TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS tasks_state ON tasks(state);
       CREATE INDEX IF NOT EXISTS tasks_thread_project ON tasks(thread_id, group_jid, project);
@@ -30,15 +31,27 @@ export class Store {
     if (project && !this.db.prepare('SELECT 1 FROM tasks WHERE thread_id=? AND group_jid=? AND project=? LIMIT 1').get(link.thread_id, group, project)) return;
     return link.thread_id;
   }
+  requestForMessage(chat: string, id?: string): Task | undefined {
+    if (!id) return;
+    const outgoing=this.db.prepare('SELECT task_id FROM outbox WHERE group_jid=? AND id=?').get(chat,id) as {task_id:string} | undefined;
+    return outgoing ? this.task(outgoing.task_id) : this.db.prepare('SELECT * FROM tasks WHERE group_jid=? AND message_id=?').get(chat,id) as unknown as Task | undefined;
+  }
+  chatProject(chat: string): string | undefined {
+    return (this.db.prepare('SELECT project FROM chat_mappings WHERE chat_jid=?').get(chat) as {project:string} | undefined)?.project;
+  }
+  mapChat(chat: string, project: string) {
+    this.db.prepare('INSERT OR REPLACE INTO chat_mappings VALUES (?,?)').run(chat,project);
+  }
+  unmapChat(chat: string) { this.mapChat(chat,''); }
   isOutgoing(group: string, id?: string): boolean {
     return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE group_jid=? AND id=?').get(group, id));
   }
   link(group: string, message: string, thread: string) {
     this.db.prepare('INSERT OR REPLACE INTO links VALUES (?,?,?)').run(group, message, thread);
   }
-  add(id: string, m: Incoming, project: string, thread?: string): boolean {
-    return this.db.prepare("INSERT OR IGNORE INTO tasks (id,group_jid,message_id,project,thread_id,state,payload) VALUES (?,?,?,?,?,'queued',?)")
-      .run(id, m.group, m.id, project, thread ?? null, JSON.stringify(m, BufferJSON.replacer)).changes > 0;
+  add(id: string, m: Incoming, project: string, thread?: string, state = 'queued'): boolean {
+    return this.db.prepare("INSERT OR IGNORE INTO tasks (id,group_jid,message_id,project,thread_id,state,payload) VALUES (?,?,?,?,?,?,?)")
+      .run(id, m.group, m.id, project, thread ?? null, state, JSON.stringify(m, BufferJSON.replacer)).changes > 0;
   }
   task(id: string): Task | undefined { return this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id) as unknown as Task | undefined; }
   runningThreadIds(): Set<string> {

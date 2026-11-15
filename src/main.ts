@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import makeWASocket, { DEFAULT_CONNECTION_CONFIG, fetchLatestWaWebVersion, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qr from 'qrcode-terminal';
-import { loadConfig, type Config } from './config.js';
+import { loadConfig, projectCatalog, isSupportedChat, type Config } from './config.js';
 import { hasSelfPrefix, normalize, shouldHandleUpsert } from './messages.js';
 import { Store } from './store.js';
 import { T3Cli, command } from './t3.js';
@@ -17,15 +17,15 @@ process.umask(0o077);
 const pairingOnly = process.argv[2] === 'pair';
 const config: Config = pairingOnly ? {
   t3Binary:'t3', dataDir:resolve(process.env.T3_WHATSAPP_DATA_DIR ?? '.data'),
-  selfCommands:false, allowedSenderJids:[], routes:[], pollIntervalMs:15000, maxMessageAgeSeconds:300,
+  selfCommands:false, accountWide:false, projects:{}, allowedSenderJids:[], routes:[], pollIntervalMs:15000, maxMessageAgeSeconds:300,
 } : loadConfig();
 const error = (e: unknown) => console.error(e instanceof Error ? e.message : 'Bridge operation failed.');
 
 if (process.argv[2] === 'doctor') {
-  await command(config.t3Binary, ['thread', 'list', '--project', config.routes[0].project, '--json']);
-  console.log('Configuration is valid; T3 Code is reachable and the first project is registered.');
-  for (const route of config.routes.slice(1)) await command(config.t3Binary, ['thread','list','--project',route.project,'--json']);
-  console.log('All configured projects checked. WhatsApp pairing is checked when you start the bridge.');
+  const projects=[...new Set(projectCatalog(config).values())];
+  for (const project of projects) await command(config.t3Binary,['thread','list','--project',project,'--json']);
+  console.log(`Configuration is valid; T3 Code is reachable and all ${projects.length} configured projects are registered.`);
+  console.log('WhatsApp pairing is checked when you start the bridge.');
 } else {
   mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   chmodSync(config.dataDir, 0o700);
@@ -141,7 +141,7 @@ if (process.argv[2] === 'doctor') {
         diagnostic('connected');
         connected = true; reconnects = 0; openedAt = Date.now();
         console.log('WhatsApp connected. Only configured groups and authorized senders can start tasks.');
-        if (config.selfCommands) console.log('Single-account mode: type @bot followed by a task in your configured group.');
+        if (config.selfCommands) console.log(config.accountWide ? 'Account-wide mode: use @bot #project-name followed by a task in any personal chat, group, or Message yourself.' : 'Single-account mode: type @bot followed by a task in your configured chat.');
         if (pairingOnly) {
           console.log('Bot identifiers:', [current.user?.id, current.user?.lid].filter(Boolean).map(id=>jidNormalizedUser(id!)).join(', '));
           void current.groupFetchAllParticipating().then(groups => {
@@ -190,7 +190,7 @@ if (process.argv[2] === 'doctor') {
         if (!shouldHandleUpsert(event.type, message, config.selfCommands, startedAtSeconds)) continue;
         const accepted = bridge.accept(message, ids);
         acceptedAny ||= accepted;
-        if (config.routes.some(route => route.groupJid === message.group) && (message.fromMe || hasSelfPrefix(message.text))) {
+        if (isSupportedChat(message.group) && (config.accountWide || config.routes.some(route => route.chatJid === message.group)) && (accepted || hasSelfPrefix(message.text) || store.isOutgoing(message.group,message.quotedId))) {
           diagnostic('command-check', {accepted, fromMe:message.fromMe, hasPrefix:hasSelfPrefix(message.text), type:event.type});
         }
       }

@@ -10,7 +10,7 @@ import {normalize} from '../src/messages.js';
 import type {Config} from '../src/config.js';
 import type {T3} from '../src/t3.js';
 
-const config: Config = {t3Binary:'t3',dataDir:'.data',selfCommands:true,allowedSenderJids:['100@s.whatsapp.net'],routes:[{groupJid:'300@g.us',project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300};
+const config: Config = {t3Binary:'t3',dataDir:'.data',accountWide:false,projects:{},selfCommands:true,allowedSenderJids:['100@s.whatsapp.net'],routes:[{chatJid:'300@g.us',project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300};
 function setup(t: TestContext) {
   const dir=mkdtempSync(join(tmpdir(),'t3-worker-'));
   const store=new Store(join(dir,'state.sqlite'));
@@ -70,7 +70,7 @@ test('ambiguous WhatsApp delivery is held for review rather than retried', async
 });
 test('removed routes cannot dispatch persisted tasks or outbox replies', async t=>{
   const s=setup(t);const task=s.queue('queued');s.store.outgoing('out',task,'old project response');
-  const changed=new Bridge({...config,routes:[{groupJid:'300@g.us',project:'/different-project'}]},s.store,s.t3,()=>{});
+  const changed=new Bridge({...config,routes:[{chatJid:'300@g.us',project:'/different-project'}]},s.store,s.t3,()=>{});
   const worker=new Worker(changed,s.store,()=>true,async()=>{s.sends.push('unexpected');return {};},()=>{});
   await worker.tick();assert.equal(s.submissions.length,0);assert.equal(s.sends.length,0);assert.equal(s.store.tasks('review').length,1);
 });

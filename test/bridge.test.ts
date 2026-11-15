@@ -10,7 +10,7 @@ import type { Config } from '../src/config.js';
 import type { Snapshot, T3 } from '../src/t3.js';
 
 const bot = '100@s.whatsapp.net', owner = '200@s.whatsapp.net', group = '300@g.us';
-const config: Config = { t3Binary:'t3',dataDir:'.data',selfCommands:false,allowedSenderJids:[owner],routes:[{groupJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
+const config: Config = { t3Binary:'t3',dataDir:'.data',accountWide:false,projects:{},selfCommands:false,allowedSenderJids:[owner],routes:[{chatJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
 function message(id = 'm1', options: {sender?: string;quoted?:string;mention?:boolean;text?:string} = {}) {
   return normalize({key:{id,remoteJid:group,participant:options.sender ?? owner},messageTimestamp:Math.floor(Date.now()/1000),message:{extendedTextMessage:{text:options.text ?? '@100 fix the signup button',contextInfo:{mentionedJid:options.mention === false ? [] : [bot],stanzaId:options.quoted,quotedMessage:options.quoted ? {conversation:'Signup fails on mobile'} : undefined}}}});
 }
@@ -178,10 +178,12 @@ test('a second waiting episode produces a fresh notice after the thread resumes'
 test('reconfiguring a group cannot reuse a thread belonging to its old project', async t => {
   const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();
   const ack=store.pending()[0];
-  const changed=new Bridge({...config,routes:[{groupJid:group,project:'/other-project'}]},store,t3,()=>{});
-  assert.equal(changed.accept(message('plain-reply',{quoted:ack.id,mention:false}),[bot]),false);
+  const changed=new Bridge({...config,routes:[{chatJid:group,project:'/other-project'}]},store,t3,()=>{});
+  assert.equal(changed.accept(message('plain-reply',{quoted:ack.id,mention:false}),[bot]),true);
+  assert.equal(store.tasks('awaiting_project').length,1);
   assert.equal(changed.accept(message('new-task',{quoted:ack.id}),[bot]),true);
-  assert.equal(store.tasks('queued')[0].thread_id,null);
+  assert.equal(store.tasks('queued').length,0);
+  assert.equal(store.tasks('awaiting_project').length,2);
 });
 test('pairing-mode store access does not mutate interrupted side-effect states', () => {
   const dir=mkdtempSync(join(tmpdir(),'t3-pair-store-')),path=join(dir,'state.sqlite');
