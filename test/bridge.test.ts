@@ -18,7 +18,6 @@ class FakeT3 implements T3 {
   calls: {project:string;prompt:string;thread?:string}[] = [];
   snapshot: Snapshot = {thread:{threadId:'t1',status:'running',latestRunId:'r1',pendingRequestCount:0},messages:[]};
   async submit(project:string,prompt:string,thread?:string) { this.calls.push({project,prompt,thread}); return {threadId:thread ?? 't1',runId:'r'+this.calls.length}; }
-  async listThreads() { return []; }
   async show() { return this.snapshot; }
 }
 function setup(t: TestContext, settings: Config = config) {
@@ -46,7 +45,7 @@ test('initial task receives quoted context and replies to its acknowledgement co
   assert.match(t3.calls[0].prompt,/Signup fails on mobile/);
   assert.equal(t3.calls[0].thread,undefined);
   const ack = store.pending()[0];
-  assert.equal(store.findThread(group,ack.id),'t1');
+  assert.equal(store.requestForMessage(group,ack.id)?.thread_id,'t1');
   assert.equal(bridge.accept(message('follow',{quoted:ack.id,mention:false,text:'Also fix desktop'}),[bot]),true);
   await bridge.submitQueued();
   assert.equal(t3.calls.length,1,'follow-up waits for the active request');
@@ -56,7 +55,7 @@ test('initial task receives quoted context and replies to its acknowledgement co
   assert.equal(store.pending().filter(m=>m.text==='Fixed and tested.').length,1);
   await bridge.submitQueued();
   assert.equal(t3.calls[1].thread,'t1');
-  assert.equal(store.findThread('other@g.us',ack.id),undefined);
+  assert.equal(store.requestForMessage('other@g.us',ack.id)?.thread_id,undefined);
 });
 test('pending approvals are surfaced once and never accepted by the bridge', async t => {
   const {bridge,store,t3} = setup(t);
@@ -87,9 +86,9 @@ test('restart retains mappings and marks interrupted side effects for review', (
   const dir=mkdtempSync(join(tmpdir(),'t3-wa-restart-')), path=join(dir,'test.sqlite');
   let store=new Store(path);
   try {
-    store.add('task',message(),'/project'); store.setState('task','submitting');
-    store.link(group,'ack','t1'); store.close(); store=new Store(path);
-    assert.equal(store.findThread(group,'ack'),'t1'); assert.equal(store.tasks('review').length,1);
+    store.add('task',message(),'/general','t1'); store.setState('task','submitting');
+    store.outgoing('ack',store.task('task')!,'Working');store.close();store=new Store(path);
+    assert.equal(store.requestForMessage(group,'ack')?.thread_id,'t1');assert.equal(store.tasks('review').length,1);
   } finally { store.close(); rmSync(dir,{recursive:true,force:true}); }
 });
 test('attachments are explicitly rejected rather than silently omitted from a task', async t => {
@@ -155,7 +154,7 @@ test('outbox echo suppression survives a restart, including ambiguous sends', ()
 
 test('two queued follow-ups for one idle thread submit one at a time', async t => {
   const {bridge,store,t3}=setup(t);
-  for (const id of ['first','second']) store.add(id,message(id),'/project','existing');
+  for (const id of ['first','second']) store.add(id,Object.assign(message(id),{bridgeVersion:2}),'/general','existing');
   await bridge.submitQueued();
   assert.equal(t3.calls.length,1);assert.equal(store.tasks('queued').length,1);
 });
@@ -176,16 +175,13 @@ test('a second waiting episode produces a fresh notice after the thread resumes'
   t3.snapshot.thread.pendingRequestCount=1;await bridge.collectResults();
   assert.equal(store.pending().filter(m=>m.text.includes('needs your input')).length,2);
 });
-test('reconfiguring a group cannot reuse a thread belonging to its old project', async t => {
-  const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();
-  const ack=store.pending()[0];
+test('changing a group mapping updates prompt context without moving its conversation', async t => {
+  const {bridge,t3,store}=setup(t);bridge.accept(message(),[bot]);await bridge.submitQueued();const ack=store.pending()[0];
   const changed=new Bridge({...config,routes:[{chatJid:group,project:'/other-project'}]},store,t3,()=>{});
-  assert.equal(changed.accept(message('plain-reply',{quoted:ack.id,mention:false}),[bot]),true);
-  assert.equal(store.tasks('awaiting_project').length,0);
-  assert.equal(changed.accept(message('new-task',{quoted:ack.id}),[bot]),true);
-  assert.equal(store.tasks('queued').length,0);
-  assert.equal(store.tasks('awaiting_project').length,0);
-  assert.equal(store.tasks('control').length,2);
+  changed.accept(message('reply',{quoted:ack.id,mention:false,text:'explain more'}),[bot]);
+  t3.snapshot.thread.status='completed';await changed.collectResults();await changed.submitQueued();
+  assert.equal(t3.calls[1].project,'/general');assert.equal(t3.calls[1].thread,'t1');
+  assert.equal(JSON.parse(t3.calls[1].prompt.split('\n\n').at(-1)!).projectContext.projects[0].target,'/other-project');
 });
 test('pairing-mode store access does not mutate interrupted side-effect states', () => {
   const dir=mkdtempSync(join(tmpdir(),'t3-pair-store-')),path=join(dir,'state.sqlite');
@@ -203,14 +199,17 @@ test('long emoji responses retain complete Unicode characters across chunks', t 
   assert.equal(store.pending().map(m=>m.text).join(''),text);
 });
 
-test('restart suppresses unsent legacy project-picker prompts without replaying tasks',()=>{
+test('restart supersedes all legacy selection prompts without replaying their requests',()=>{
   const dir=mkdtempSync(join(tmpdir(),'t3-legacy-picker-')),path=join(dir,'state.sqlite');
   let store=new Store(path);
   try {
-    store.add('legacy',message(),' ',undefined,'awaiting_project');
-    store.outgoing('picker',store.task('legacy')!,'Which project should handle this?');
+    for (const state of ['awaiting_project','awaiting_thread','awaiting_new_task']) {
+      store.add(state,message(state),'/website',undefined,state);
+      store.outgoing(state,store.task(state)!,'Old selection prompt');
+    }
     store.close();store=new Store(path);
     assert.equal(store.pending().length,0);assert.equal(store.tasks('queued').length,0);
-    assert.equal(store.tasks('awaiting_project').length,1);
+    assert.equal(store.tasks('superseded').length,3);
+    assert.equal(store.isOutgoing(group,'awaiting_thread'),true,'old IDs still suppress echoes');
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });

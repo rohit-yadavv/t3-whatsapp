@@ -22,7 +22,7 @@ const config: Config = pairingOnly ? {
 const error = (e: unknown) => console.error(e instanceof Error ? e.message : 'Bridge operation failed.');
 
 if (process.argv[2] === 'doctor') {
-  const projects=[...new Set(projectCatalog(config).values())];
+  const projects=[...new Set([config.noProject,...projectCatalog(config).values()])];
   for (const project of projects) await command(config.t3Binary,['thread','list','--project',project,'--json']);
   console.log(`Configuration is valid; T3 Code is reachable and all ${projects.length} configured projects are registered.`);
   console.log('WhatsApp pairing is checked when you start the bridge.');

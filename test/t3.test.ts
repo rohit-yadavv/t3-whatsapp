@@ -49,13 +49,3 @@ test('adapter rejects malformed snapshots and responses for another thread', asy
     await assert.rejects(cli.show('expected'),/Unexpected T3 thread snapshot/);
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
-
-test('thread discovery uses the chosen project and validates the listing',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'t3-thread-list-')),binary=join(dir,'fake-t3');
-  try {
-    writeFileSync(binary,`#!${process.execPath}\nif(!process.argv.includes('/website'))process.exit(1);console.log(JSON.stringify([{threadId:'todo',title:'Todo',projectId:'website'}]))\n`,{mode:0o700});
-    assert.deepEqual(await new T3Cli(binary).listThreads('/website'),[{threadId:'todo',title:'Todo'}]);
-    writeFileSync(binary,`#!${process.execPath}\nconsole.log(JSON.stringify([{threadId:123,title:'invalid'}]))\n`);
-    await assert.rejects(new T3Cli(binary).listThreads('/website'),/Unexpected T3 thread list/);
-  }finally{rmSync(dir,{recursive:true,force:true});}
-});

@@ -16,7 +16,6 @@ function setup(t: TestContext) {
   const store=new Store(join(dir,'state.sqlite'));
   const submissions:string[]=[], polls:string[]=[], sends:string[]=[];
   const t3:T3={
-    listThreads:async()=>[],
     submit:async(_project,_prompt,thread)=>{submissions.push(thread ?? 'new');return {threadId:thread ?? 't1',runId:'r1'};},
     show:async thread=>{polls.push(thread);return {thread:{threadId:thread,status:'running',latestRunId:'r1',pendingRequestCount:0},messages:[]};},
   };
@@ -26,7 +25,7 @@ function setup(t: TestContext) {
   const worker=new Worker(bridge,store,()=>enabled,async outgoing=>{sends.push(outgoing.id);return {conversation:outgoing.text};},e=>errors.push(e));
   function queue(id:string,thread?:string) {
     const m=normalize({key:{id,remoteJid:'300@g.us',fromMe:true},messageTimestamp:Math.floor(Date.now()/1000),message:{conversation:'@bot explain'}});
-    store.add(id,m,'/project',thread);
+    store.add(id,Object.assign(m,{bridgeVersion:2}),'/general',thread);
     return store.task(id)!;
   }
   t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true});});
@@ -71,7 +70,7 @@ test('ambiguous WhatsApp delivery is held for review rather than retried', async
 });
 test('removed routes cannot dispatch persisted tasks or outbox replies', async t=>{
   const s=setup(t);const task=s.queue('queued');s.store.outgoing('out',task,'old project response');
-  const changed=new Bridge({...config,routes:[{chatJid:'300@g.us',project:'/different-project'}]},s.store,s.t3,()=>{});
+  const changed=new Bridge({...config,routes:[]},s.store,s.t3,()=>{});
   const worker=new Worker(changed,s.store,()=>true,async()=>{s.sends.push('unexpected');return {};},()=>{});
   await worker.tick();assert.equal(s.submissions.length,0);assert.equal(s.sends.length,0);assert.equal(s.store.tasks('review').length,1);
 });

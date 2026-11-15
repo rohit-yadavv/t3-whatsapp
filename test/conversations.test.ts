@@ -1,71 +1,114 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Bridge} from '../src/bridge.js';
 import {config,chat,owner,own,setup} from './conversation-support.js';
+const data=(prompt:string)=>JSON.parse(prompt.split('\n\n').at(-1)!);
 
-test('greetings in unmapped chats receive a No project AI conversation',async t=>{
-  const s=setup(t);assert.equal(s.bridge.accept(own('hi','@bot hi'),[owner]),true);
-  assert.equal(s.store.tasks('awaiting_project').length,0);
-  await s.bridge.submitQueued();assert.equal(s.calls[0].project,'/general');
-  assert.match(s.calls[0].prompt,/Respond naturally/);assert.match(s.calls[0].prompt,/general No project conversation/);
+test('each new personal chat, group and self-chat gets its own No project conversation',async t=>{
+  const s=setup(t);
+  for (const jid of [chat,'300@g.us',owner]) s.bridge.accept(own(jid,'@bot hi',undefined,jid),[owner]);
+  await s.bridge.submitQueued();
+  assert.equal(s.calls.length,3);assert.ok(s.calls.every(c=>c.project==='/general' && !c.thread));
+  assert.equal(new Set(s.calls.map(c=>c.threadId)).size,3);
+  assert.match(s.calls[0].prompt,/Respond naturally/);
 });
-test('standalone follow-ups retain project and thread after a restart',async t=>{
+test('follow-ups reuse their chat conversation across restart, even when project hints change',async t=>{
   const s=setup(t);s.bridge.accept(own('first','@bot #website investigate checkout'),[owner]);await s.bridge.submitQueued();
   s.finish();await s.bridge.collectResults();s.restart();
-  s.bridge.accept(own('follow','@bot what did you find?'),[owner]);await s.bridge.submitQueued();
-  assert.equal(s.calls[1].project,'/website');assert.equal(s.calls[1].thread,'t1');
+  s.bridge.accept(own('follow','@bot #mobile compare this with the mobile flow'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[1].project,'/general');assert.equal(s.calls[1].thread,'t1');
+  assert.equal(data(s.calls[1].prompt).projectContext.projects[0].target,'/mobile');
 });
-test('rapid follow-ups wait for the initial thread and share it',async t=>{
+test('rapid follow-ups wait for the first submission and then share its thread',async t=>{
   const s=setup(t);
-  s.bridge.accept(own('one','@bot #website investigate'),[owner]);
-  s.bridge.accept(own('two','@bot explain tests too'),[owner]);
-  s.bridge.accept(own('three','@bot then fix it'),[owner]);
+  for (const [id,text] of [['one','@bot #website investigate'],['two','@bot explain tests too'],['three','@bot then fix it']]) s.bridge.accept(own(id,text),[owner]);
   await s.bridge.submitQueued();assert.equal(s.calls.length,1);
   s.finish();await s.bridge.collectResults();await s.bridge.submitQueued();assert.equal(s.calls.length,2);
-  assert.equal(s.calls[1].thread,'t1');
   s.finish();await s.bridge.collectResults();await s.bridge.submitQueued();assert.equal(s.calls.length,3);
+  assert.ok(s.calls.slice(1).every(c=>c.thread==='t1'));
+  assert.equal(s.store.context(chat)?.thread_id,'t1');
+});
+test('explicit hints override chat mappings in the prompt without changing the conversation',async t=>{
+  const s=setup(t);s.store.mapChat(chat,'/website');
+  s.bridge.accept(own('first','@bot #mobile save this to my todo thread'),[owner]);await s.bridge.submitQueued();
+  assert.deepEqual(data(s.calls[0].prompt).projectContext,{source:'message',projects:[{name:'mobile',target:'/mobile'}]});
+  s.finish();await s.bridge.collectResults();s.bridge.accept(own('next','@bot show pending todos'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[1].thread,'t1');assert.deepEqual(data(s.calls[1].prompt).projectContext,{source:'mapping',projects:[{name:'website',target:'/website'}]});
+  assert.equal(s.store.chatProject(chat),'/website');
+});
+test('mapping and unmapping preserve the active conversation',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('map','@bot use website for this chat'),[owner]);assert.equal(s.store.context(chat)?.thread_id,'t1');
+  s.bridge.accept(own('follow','@bot investigate checkout'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,'t1');
+  s.finish();await s.bridge.collectResults();s.bridge.accept(own('unmap','@bot unmap this chat'),[owner]);
+  s.bridge.accept(own('last','@bot thanks'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[2].thread,'t1');assert.equal(data(s.calls[2].prompt).projectContext,undefined);
+});
+test('new resets only its chat and retains mapping; older results cannot steal its focus',async t=>{
+  const s=setup(t);s.store.mapChat(chat,'/website');s.bridge.accept(own('old','@bot hi'),[owner]);await s.bridge.submitQueued();
+  s.bridge.accept(own('other','@bot hi',undefined,'300@g.us'),[owner]);await s.bridge.submitQueued();
+  s.bridge.accept(own('reset','@bot new'),[owner]);assert.equal(s.store.context(chat),undefined);assert.equal(s.store.chatProject(chat),'/website');
+  s.bridge.accept(own('fresh','@bot investigate'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[2].thread,undefined);assert.equal(s.calls[2].project,'/general');
+  s.finish('t1');await s.bridge.collectResults();assert.equal(s.store.context(chat)?.thread_id,'t3');
+  assert.equal(s.store.context('300@g.us')?.thread_id,'t2');
+});
+test('replying to an older bot response resumes that conversation after a reset',async t=>{
+  const s=setup(t);s.bridge.accept(own('old','@bot hi'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
+  s.finish();await s.bridge.collectResults();s.bridge.accept(own('reset','@bot new'),[owner]);
+  s.bridge.accept(own('fresh','@bot another topic'),[owner]);await s.bridge.submitQueued();
+  s.bridge.accept(own('reply','what were we discussing?',ack.id),[owner]);await s.bridge.submitQueued();
   assert.equal(s.calls[2].thread,'t1');assert.equal(s.store.context(chat)?.thread_id,'t1');
 });
-test('project focus alone is remembered without creating an empty agent task',async t=>{
-  const s=setup(t);s.bridge.accept(own('focus','@bot #website'),[owner]);await s.bridge.submitQueued();
-  assert.equal(s.calls.length,0);assert.equal(s.store.context(chat)?.project,'/website');
-  s.bridge.accept(own('task','@bot explain this'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[0].project,'/website');
+test('thread names, todo requests and new-thread requests are forwarded as natural language',async t=>{
+  const s=setup(t);const instruction='create a thread in Diskovalist and add this to my Launch planning thread';
+  s.bridge.accept(own('natural','@bot '+instruction,'issue',chat,'Improve the logo'),[owner]);await s.bridge.submitQueued();
+  assert.equal(data(s.calls[0].prompt).instruction,instruction);assert.equal(data(s.calls[0].prompt).quotedContext,'Improve the logo');
+  assert.match(s.calls[0].prompt,/available T3 tools/);assert.match(s.calls[0].prompt,/wait for and relay/);
+  assert.doesNotMatch(s.calls[0].prompt,/Capture-only|in THIS conversation|Only an explicit/);
+  s.finish();await s.bridge.collectResults();s.bridge.accept(own('literal','@bot ~"Launch planning" save this for later'),[owner]);await s.bridge.submitQueued();
+  assert.equal(data(s.calls[1].prompt).instruction,'~"Launch planning" save this for later');
+  assert.equal(s.store.tasks('awaiting_thread').length,0);
 });
-test('active project overrides mapping while new resets to the saved mapping',async t=>{
+test('unknown or multiple hashtags are prompt hints for T3 to resolve without bridge menus',async t=>{
   const s=setup(t);s.store.mapChat(chat,'/website');
-  s.bridge.accept(own('mobile','@bot #mobile investigate'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
-  s.bridge.accept(own('follow','@bot explain more'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].project,'/mobile');assert.equal(s.calls[1].thread,'t1');
-  s.bridge.accept(own('reset','@bot new'),[owner]);assert.equal(s.store.context(chat),undefined);assert.equal(s.store.chatProject(chat),'/website');
-  s.bridge.accept(own('fresh','@bot explain this'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[2].project,'/website');assert.equal(s.calls[2].thread,undefined);
+  s.bridge.accept(own('hints','@bot #unregistered #mobile compare these'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[0].project,'/general');
+  assert.deepEqual(data(s.calls[0].prompt).projectContext,{source:'message',projects:[{name:'unregistered'},{name:'mobile',target:'/mobile'}]});
+  assert.equal(s.store.tasks('control').length,0);
 });
-test('active conversations are isolated between chats',async t=>{
-  const s=setup(t);s.bridge.accept(own('site','@bot #website investigate'),[owner]);await s.bridge.submitQueued();
-  s.bridge.accept(own('other','@bot hi',undefined,'300@g.us'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].project,'/general');assert.equal(s.calls[1].thread,undefined);
-  assert.equal(s.store.context(chat)?.project,'/website');
+test('new project names in ordinary conversation are left for the agent to interpret',async t=>{
+  const s=setup(t);s.bridge.accept(own('natural','@bot create a thread in the website project'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[0].project,'/general');assert.equal(data(s.calls[0].prompt).projectContext,undefined);
+  assert.equal(data(s.calls[0].prompt).instruction,'create a thread in the website project');
 });
-test('removed active projects fall back to general conversation without a selector',async t=>{
-  const s=setup(t);s.store.focusChat(chat,'/website','old-thread');
-  const changed=new Bridge({...config,projects:{mobile:'/mobile'}},s.store,s.t3,()=>{});
-  changed.accept(own('follow','@bot fix it'),[owner]);await changed.submitQueued();
-  assert.equal(s.calls.length,1);assert.equal(s.calls[0].project,'/general');assert.equal(s.store.tasks('awaiting_project').length,0);
+test('ambiguous earlier submissions block continuation instead of creating a duplicate conversation',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot fix it'),[owner]);s.bridge.accept(own('follow','@bot explain more'),[owner]);
+  s.store.setState(s.store.tasks('queued')[0].id,'review');await s.bridge.submitQueued();
+  assert.equal(s.calls.length,0);assert.equal(s.store.tasks('review').length,2);
 });
-test('an ambiguous earlier submission prevents automatic continuation',async t=>{
-  const s=setup(t);s.bridge.accept(own('first','@bot #website fix'),[owner]);
-  s.bridge.accept(own('follow','@bot explain more'),[owner]);
-  const first=s.store.tasks('queued')[0];s.store.setState(first.id,'review');
-  await s.bridge.submitQueued();assert.equal(s.calls.length,0);assert.equal(s.store.tasks('review').length,2);
+test('legacy routing requests are held for review and old contexts are not resumed',async t=>{
+  const s=setup(t);s.store.add('legacy',own('old','@bot ~todo save this'),'/general');s.store.focusChat(chat,'/general','old-thread','legacy');
+  s.bridge.accept(own('fresh','@bot hello'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.store.task('legacy')?.state,'review');assert.equal(s.calls.length,1);assert.equal(s.calls[0].thread,undefined);
 });
-test('explicit new with an instruction starts another thread in the selected project',async t=>{
-  const s=setup(t);s.bridge.accept(own('first','@bot #website explain'),[owner]);await s.bridge.submitQueued();
-  s.bridge.accept(own('new','@bot #website new investigate another issue'),[owner]);await s.bridge.submitQueued();
-  assert.equal(s.calls.length,2);assert.equal(s.calls[1].thread,undefined);
-  assert.equal(JSON.parse(s.calls[1].prompt.split('\n\n').at(-1)!).instruction,'investigate another issue');
+test('old project-bound bot replies cannot pull the new conversation back into that project',async t=>{
+  const s=setup(t);s.store.add('legacy',own('old','@bot fix'),'/website','old-thread','completed');s.store.outgoing('old-ack',s.store.task('legacy')!,'Done');
+  s.store.focusChat(chat,'/website','old-thread','legacy');s.bridge.accept(own('fresh','@bot explain more','old-ack'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[0].project,'/general');assert.equal(s.calls[0].thread,undefined);
+});
+test('the legacy rememberContext flag cannot disable the agreed per-chat continuity',async t=>{
+  const s=setup(t,{...config,rememberContext:false});s.bridge.accept(own('one','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('two','@bot thanks'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,'t1');
 });
 
-test('mentioning project names in ordinary research text never routes out of No project',async t=>{
-  const s=setup(t);s.bridge.accept(own('research','@bot lets research how to improve our website and mobile companion branding'),[owner]);
-  await s.bridge.submitQueued();assert.equal(s.calls[0].project,'/general');
-  assert.equal(s.store.tasks('awaiting_project').length,0);
-  assert.ok(s.store.pending().every(m=>!m.text.includes('Which project')));
-  assert.match(s.calls[0].prompt,/without asking the user to select a project/);
+test('only the exact new control resets context; natural requests starting with new are forwarded',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('natural','@bot new thread in the website project, please'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[1].thread,'t1');assert.equal(data(s.calls[1].prompt).instruction,'new thread in the website project, please');
+});
+test('unsupported media cannot change a chat mapping or reset an active conversation',async t=>{
+  const s=setup(t);s.store.mapChat(chat,'/website');s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();
+  s.bridge.accept({...own('attachment','@bot new'),hasMedia:true},[owner]);
+  s.bridge.accept({...own('mapping','@bot use mobile for this chat'),hasMedia:true},[owner]);
+  assert.equal(s.store.context(chat)?.thread_id,'t1');assert.equal(s.store.chatProject(chat),'/website');assert.equal(s.store.tasks('unsupported').length,2);
 });

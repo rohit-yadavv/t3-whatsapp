@@ -27,8 +27,7 @@ test('supported chat identifiers exclude channels and broadcasts',()=>{
   for(const jid of ['status@broadcast','300@newsletter','malformed']) assert.equal(isSupportedChat(jid),false);
 });
 
-test('No project has a default workspace and a reserved alias',()=>{
+test('No project has a default workspace separate from optional project hints',()=>{
   const c=read({allowedSenderJids:['100@s.whatsapp.net']});
-  assert.equal(c.noProject,'~/.t3/scratch');assert.equal(projectCatalog(c).get('no-project'),'~/.t3/scratch');
-  assert.throws(()=>read({...base,noProject:'/general',projects:{'no-project':'/wrong'}}),/reserved/);
+  assert.equal(c.noProject,'~/.t3/scratch');assert.equal(projectCatalog(c).size,0);
 });
