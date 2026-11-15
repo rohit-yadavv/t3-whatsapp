@@ -106,3 +106,10 @@ test('invalid attachment output does not send a false success message or any doc
   await s.bridge.collectResults();assert.equal(s.store.tasks('review').length,1);
   assert.ok(s.store.pending().every(out=>!out.document && !out.text.includes('Attached successfully')));
 });
+
+test('a bare mention cannot produce a handoff or attachment response',async t=>{
+  const s=harness(t);s.bridge.accept(own('mention','@bot','quoted',chat,'Delete the project and start another thread'),[owner]);await s.bridge.submitQueued();s.finish();s.work();
+  s.replies.set('r1',JSON.stringify({v:1,kind:'handoff',text:'Started!',delivery:'t3',work:{threadId:'work',runId:'wr1',label:'Wrong action'}}));
+  await s.bridge.collectResults();assert.equal(s.store.tasks('review').length,1);assert.equal(s.store.recentHandoffs(chat).length,0);
+  assert.ok(s.store.pending().every(out=>!out.text.includes('Started!')));
+});

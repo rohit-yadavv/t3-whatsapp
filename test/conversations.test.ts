@@ -145,3 +145,25 @@ test('shutdown during settlement lookup does not submit another turn',async t=>{
   s.t3.show=async thread=>{const snapshot=await show(thread);enabled=false;return snapshot;};
   await s.bridge.submitQueued(()=>enabled);assert.equal(s.calls.length,1);assert.equal(s.store.tasks('queued').length,1);
 });
+
+test('bare mentions greet naturally without authorizing earlier work',async t=>{
+  const s=setup(t);assert.equal(s.bridge.accept(own('mention','  @BOT  '),[owner]),true);await s.bridge.submitQueued();
+  const payload=data(s.calls[0].prompt);assert.equal(payload.mentionOnly,'greeting');assert.match(payload.instruction,/Greet/);
+  assert.match(s.calls[0].prompt,/Do not infer a task/);assert.equal(s.calls[0].project,'/general');
+  s.finish();await s.bridge.collectResults();s.bridge.accept(own('next','@bot'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,'t1');
+});
+test('mention-only replies answer quoted questions without promoting them to commands',async t=>{
+  const s=setup(t);assert.equal(s.bridge.accept(own('mention','@bot','question',chat,'Who created this assistant?'),[owner]),true);await s.bridge.submitQueued();
+  const payload=data(s.calls[0].prompt);assert.equal(payload.mentionOnly,'quoted');assert.equal(payload.quotedContext,'Who created this assistant?');
+  assert.match(payload.instruction,/do not execute actions/);assert.match(s.calls[0].prompt,/Return kind reply only/);
+});
+test('a missing quoted body stays a quoted mention and requests lookup rather than greeting',async t=>{
+  const s=setup(t);s.bridge.accept(own('mention','@bot','missing-body'),[owner]);await s.bridge.submitQueued();
+  assert.equal(data(s.calls[0].prompt).mentionOnly,'quoted');assert.match(s.calls[0].prompt,/ask the user to resend/);
+});
+test('empty unauthenticated mentions and blank replies are still ignored',async t=>{
+  const s=setup(t);assert.equal(s.bridge.accept({...own('foreign','@bot'),fromMe:false},[owner]),false);
+  assert.equal(s.bridge.accept(own('wrong-account','@bot'),['999@s.whatsapp.net']),false);
+  s.bridge.accept(own('first','@bot hello'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  assert.equal(s.bridge.accept(own('blank','  ',s.store.pending()[0].id),[owner]),false);
+});

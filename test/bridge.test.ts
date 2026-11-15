@@ -108,7 +108,6 @@ test('single-account mode accepts typed @bot only from the linked and allowliste
   assert.equal(bridge.accept(own('not-command','ordinary chat'),[bot]),false);
   assert.equal(bridge.accept(own('not-prefix','hello @bot do work'),[bot]),false);
   assert.equal(bridge.accept(own('lookalike','@botany do work'),[bot]),false);
-  assert.equal(bridge.accept(own('empty','@bot'),[bot]),false);
   assert.equal(bridge.accept({...own('outsider'),fromMe:false,sender:owner},[bot]),false);
   assert.equal(bridge.accept({...own('wrong-group'),group:'999@g.us'},[bot]),false);
   assert.equal(bridge.accept(own('wrong-account'),[owner]),false);

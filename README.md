@@ -43,6 +43,7 @@ Keep your computer awake, online, and T3 Code running.
 Send commands in a chat, group, or **Message yourself**. Reply to an issue to include its text as context. Tasks get a short confirmation after T3 accepts the handoff. Work and results stay in T3 unless you ask for them here. Simple questions get a direct answer.
 
 ```text
+@bot
 @bot hi
 @bot #website research improvements and create a report
 @bot #website add this to my Launch planning thread
@@ -51,6 +52,7 @@ Send commands in a chat, group, or **Message yourself**. Reply to an issue to in
 @bot how is the research going?
 ```
 
+- A bare `@bot` gives a short greeting. Reply with just `@bot` to answer or discuss the quoted message; actions still need an explicit instruction.
 - Each new chat or group gets its own **No project** conversation. Later messages continue it, including after restart. If you settle that thread in T3, the next message starts a fresh No project conversation.
 - Ask for “the report here”, “attach it”, or “let me know when it finishes” to opt into WhatsApp delivery. Requested files are attached; local file paths are never presented as public links.
 - Text from personal chats and groups is kept locally for 30 days, including ordinary messages and bot replies. The agent retrieves relevant context on demand; history never triggers commands. Retention and retrieval limits are configurable in `config.json`. Available recent phone history is imported on a best-effort basis.
