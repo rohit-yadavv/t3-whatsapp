@@ -1,0 +1,17 @@
+{
+  "t3Binary": "t3",
+  "dataDir": ".data",
+  "allowedSenderJids": [
+    "YOUR_NUMBER@s.whatsapp.net",
+    "YOUR_LID@lid"
+  ],
+  "routes": [
+    {
+      "groupJid": "YOUR_GROUP@g.us",
+      "project": "/absolute/path/to/your/registered/project"
+    }
+  ],
+  "pollIntervalMs": 15000,
+  "maxMessageAgeSeconds": 300,
+  "selfCommands": true
+}

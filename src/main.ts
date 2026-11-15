@@ -1,0 +1,217 @@
+import { spawn } from 'node:child_process';
+import { appendFileSync, readFileSync, rmSync, renameSync, chmodSync, closeSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import makeWASocket, { DEFAULT_CONNECTION_CONFIG, fetchLatestWaWebVersion, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from '@whiskeysockets/baileys';
+import pino from 'pino';
+import qr from 'qrcode-terminal';
+import { loadConfig, type Config } from './config.js';
+import { hasSelfPrefix, normalize, shouldHandleUpsert } from './messages.js';
+import { Store } from './store.js';
+import { T3Cli, command } from './t3.js';
+import { Bridge } from './bridge.js';
+import { Worker } from './worker.js';
+import { chooseVersion, disconnectAction, streamErrorReason } from './connection.js';
+import { pairingQrPng } from './pairing-qr.js';
+
+process.umask(0o077);
+const pairingOnly = process.argv[2] === 'pair';
+const config: Config = pairingOnly ? {
+  t3Binary:'t3', dataDir:resolve(process.env.T3_WHATSAPP_DATA_DIR ?? '.data'),
+  selfCommands:false, allowedSenderJids:[], routes:[], pollIntervalMs:15000, maxMessageAgeSeconds:300,
+} : loadConfig();
+const error = (e: unknown) => console.error(e instanceof Error ? e.message : 'Bridge operation failed.');
+
+if (process.argv[2] === 'doctor') {
+  await command(config.t3Binary, ['thread', 'list', '--project', config.routes[0].project, '--json']);
+  console.log('Configuration is valid; T3 Code is reachable and the first project is registered.');
+  for (const route of config.routes.slice(1)) await command(config.t3Binary, ['thread','list','--project',route.project,'--json']);
+  console.log('All configured projects checked. WhatsApp pairing is checked when you start the bridge.');
+} else {
+  mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
+  chmodSync(config.dataDir, 0o700);
+  const lock = join(config.dataDir, 'run.lock');
+  let fd: number;
+  try {
+    fd = openSync(lock, 'wx', 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    let owner = 'unknown';
+    try { owner = readFileSync(lock, 'utf8').trim(); } catch {}
+    console.error(`The WhatsApp data directory is already locked (PID ${owner}).`);
+    console.error('Stop the other pnpm pair/dev/start process with Ctrl+C before starting this one.');
+    console.error('If the process crashed, confirm its PID is no longer running before removing .data/run.lock.');
+    process.exit(1);
+  }
+  let closeStore: (() => void) | undefined;
+  // Register cleanup before any fallible startup I/O or network awaits.
+  process.once('exit', () => {
+    try { closeStore?.(); } catch {}
+    try {
+      rmSync(join(config.dataDir, 'pairing-qr.png'), {force:true});
+      rmSync(join(config.dataDir, 'pairing-qr.png.tmp'), {force:true});
+      if (readFileSync(lock, 'utf8').trim() === String(process.pid)) unlinkSync(lock);
+    } catch {}
+  });
+  try { writeFileSync(fd, String(process.pid)); } finally { closeSync(fd); }
+  const startedAtSeconds = Math.floor(Date.now() / 1000);
+  const store = new Store(join(config.dataDir, 'bridge.sqlite'), !pairingOnly);
+  closeStore = () => store.close();
+  const bridge = new Bridge(config, store, new T3Cli(config.t3Binary), error);
+  let socket: ReturnType<typeof makeWASocket> | undefined;
+  let connected = false, stopped = false, reconnects = 0, ackRetries = 0, openedAt = 0;
+  const qrImage = join(config.dataDir, 'pairing-qr.png');
+  let qrSequence = 0, qrOpened = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let credentialsSaved: Promise<void> = Promise.resolve();
+  const worker = new Worker(bridge, store, () => !pairingOnly && connected && !stopped, async (outgoing, quote) => {
+    if (!socket) throw new Error('WhatsApp is disconnected.');
+    const result = await socket.sendMessage(outgoing.group_jid, {text:outgoing.text}, {
+      quoted:quote as WAMessage, messageId:outgoing.id,
+    });
+    if (!result) throw new Error('WhatsApp did not confirm the send.');
+    return result.message ?? {};
+  }, error);
+  function clearPairingQr() {
+    qrSequence++;
+    rmSync(qrImage, {force:true});
+  }
+  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { void shutdown(); });
+  process.on('uncaughtException', e => { error(e); void shutdown(1); });
+  process.on('unhandledRejection', e => { error(e); void shutdown(1); });
+  const { state, saveCreds } = await useMultiFileAuthState(join(config.dataDir, 'auth'));
+  if (stopped) process.exit(0);
+  function diagnostic(event: string, details: Record<string,string|number|boolean|null> = {}) {
+    // Explicit fields only. Never serialize errors, credentials, QR data, or raw messages.
+    const record = {time:new Date().toISOString(),event,...details};
+    appendFileSync(join(config.dataDir, 'connection.ndjson'), JSON.stringify(record)+'\n', {mode:0o600});
+    console.log(`[WhatsApp] ${event}`, JSON.stringify(details));
+  }
+  const bundledVersion = DEFAULT_CONNECTION_CONFIG.version;
+  let version = bundledVersion;
+  try {
+    const live = await fetchLatestWaWebVersion({signal:AbortSignal.timeout(12000)});
+    version = chooseVersion(live, bundledVersion);
+    diagnostic('protocol-version', {version:version.join('.'),source:live.isLatest ? 'WhatsApp Web' : 'bundled fallback'});
+  } catch {
+    diagnostic('protocol-version', {version:version.join('.'),source:'bundled fallback'});
+  }
+
+  function connect() {
+    if (stopped) return;
+    const current = makeWASocket({
+      auth: state, version, logger: pino({level:'silent'}),
+      markOnlineOnConnect: false, syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      getMessage: async key => key.id ? store.message(key.id) : undefined,
+    });
+    socket = current;
+    current.ev.on('creds.update', () => {
+      credentialsSaved = credentialsSaved.then(saveCreds).catch(e => { error(e); void shutdown(1); });
+    });
+    current.ev.on('connection.update', update => {
+      if (current !== socket || stopped) return;
+      if (update.isNewLogin) {
+        diagnostic('pairing-accepted');
+        clearPairingQr();
+      }
+      if (update.qr) {
+        diagnostic('qr-ready');
+        console.log('Scan locally using the bot account: WhatsApp → Linked devices → Link a device. Keep this QR private.');
+        qr.generate(update.qr, {small:true});
+        const sequence = ++qrSequence;
+        void pairingQrPng(update.qr).then(png => {
+          if (stopped || connected || current !== socket || sequence !== qrSequence) return;
+          const temporary = qrImage + '.tmp';
+          writeFileSync(temporary, png, {mode:0o600});
+          renameSync(temporary, qrImage);
+          console.log(`Full-size QR image: ${qrImage}`);
+          console.log('Scan the image in Preview, rather than the terminal blocks. Use the newest QR; keep pairing running.');
+          if (pairingOnly && process.platform === 'darwin' && !qrOpened) {
+            qrOpened = true;
+            const viewer = spawn('open', [qrImage], {stdio:'ignore'});
+            viewer.on('error', () => console.error(`Open the QR image manually: ${qrImage}`));
+            viewer.unref();
+          }
+        }).catch(error);
+      }
+      if (update.connection === 'open') {
+        clearPairingQr();
+        diagnostic('connected');
+        connected = true; reconnects = 0; openedAt = Date.now();
+        console.log('WhatsApp connected. Only configured groups and authorized senders can start tasks.');
+        if (config.selfCommands) console.log('Single-account mode: type @bot followed by a task in your configured group.');
+        if (pairingOnly) {
+          console.log('Bot identifiers:', [current.user?.id, current.user?.lid].filter(Boolean).map(id=>jidNormalizedUser(id!)).join(', '));
+          void current.groupFetchAllParticipating().then(groups => {
+            console.log('Joined groups (private local setup output):');
+            for (const g of Object.values(groups)) console.log(`${g.id}  ${g.subject}`);
+            console.log('Add a group ID and your own sender JIDs to config.json. Press Ctrl+C before running pnpm dev.');
+          }).catch(error);
+        }
+        console.log(`Local review items: ${store.tasks('review').length} tasks. Data: ${config.dataDir}`);
+        void worker.tick();
+      }
+      if (update.connection === 'close') {
+        const wasConnected = connected;
+        connected = false;
+        const reason = (update.lastDisconnect?.error as {output?:{statusCode?:number}} | undefined)?.output?.statusCode;
+        const streamReason = streamErrorReason(update.lastDisconnect?.error);
+        if (wasConnected && Date.now() - openedAt >= 60000) ackRetries = 0;
+        const action = disconnectAction(reason, streamReason, ackRetries);
+        if (reason === 500 && streamReason === 'ack' && action === 'retry') ackRetries++;
+        diagnostic('disconnected', {code:reason ?? null,action,streamReason:streamReason ?? null});
+        if (action === 'stop') {
+          console.error(`WhatsApp stopped (${reason}). Check the phone and connection.ndjson before trying again.`);
+          void shutdown(1); return;
+        }
+        const delay = action === 'restart' ? 0 : Math.min(30000, 1000 * 2 ** Math.min(reconnects++,5));
+        // A successful QR link normally requests a restart (515). Persist the
+        // credentials before making the replacement socket and keep this version.
+        void credentialsSaved.then(() => {
+          if (!stopped) reconnectTimer = setTimeout(connect, delay);
+        });
+      }
+    });
+    current.ev.on('messages.upsert', event => {
+      if (current !== socket || stopped) return;
+      if (pairingOnly) {
+        for (const raw of event.messages) {
+          const m=normalize(raw);
+          if (!m.fromMe && m.group.endsWith('@g.us')) console.log('Setup identifiers:', JSON.stringify({groupJid:m.group,senderJid:m.sender,senderAlt:m.senderAlt || undefined}));
+        }
+        return;
+      }
+      const ids = [current.user?.id, current.user?.lid].filter((id): id is string => Boolean(id)).map(jidNormalizedUser);
+      let acceptedAny = false;
+      for (const raw of event.messages) {
+        const message = normalize(raw);
+        if (!shouldHandleUpsert(event.type, message, config.selfCommands, startedAtSeconds)) continue;
+        const accepted = bridge.accept(message, ids);
+        acceptedAny ||= accepted;
+        if (config.routes.some(route => route.groupJid === message.group) && (message.fromMe || hasSelfPrefix(message.text))) {
+          diagnostic('command-check', {accepted, fromMe:message.fromMe, hasPrefix:hasSelfPrefix(message.text), type:event.type});
+        }
+      }
+      if (acceptedAny) void worker.tick();
+    });
+  }
+  timer = setInterval(() => { void worker.tick(); }, config.pollIntervalMs);
+  async function shutdown(code = 0) {
+    if (stopped) return;
+    stopped = true; clearPairingQr(); clearInterval(timer); clearTimeout(reconnectTimer);
+    socket?.end(undefined);
+    let saved = false;
+    void credentialsSaved.then(() => { saved = true; }, () => { saved = true; });
+    const deadline = Date.now() + 10000;
+    const wait = setInterval(() => {
+      if ((!worker.running && saved) || Date.now() >= deadline) {
+        clearInterval(wait);
+        // Unfinished side effects remain marked for review on restart.
+        process.exit(worker.running || !saved ? 1 : code);
+      }
+    },100);
+  }
+  connect();
+}
