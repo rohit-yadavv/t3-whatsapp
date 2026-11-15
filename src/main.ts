@@ -10,6 +10,8 @@ import { Store } from './store.js';
 import { T3Cli, command } from './t3.js';
 import { Bridge } from './bridge.js';
 import {documentContent,type Document} from './responses.js';
+import {HistoryStore} from './history.js';
+import {HistoryRecorder,isMessageMutation,shouldImportHistory} from './history-recorder.js';
 import { Worker } from './worker.js';
 import { chooseVersion, disconnectAction, streamErrorReason } from './connection.js';
 import { pairingQrPng } from './pairing-qr.js';
@@ -44,9 +46,11 @@ if (process.argv[2] === 'doctor') {
     process.exit(1);
   }
   let closeStore: (() => void) | undefined;
+  let closeHistory: (() => void) | undefined;
   // Register cleanup before any fallible startup I/O or network awaits.
   process.once('exit', () => {
     try { closeStore?.(); } catch {}
+    try { closeHistory?.(); } catch {}
     try {
       rmSync(join(config.dataDir, 'pairing-qr.png'), {force:true});
       rmSync(join(config.dataDir, 'pairing-qr.png.tmp'), {force:true});
@@ -57,7 +61,10 @@ if (process.argv[2] === 'doctor') {
   const startedAtSeconds = Math.floor(Date.now() / 1000);
   const store = new Store(join(config.dataDir, 'bridge.sqlite'), !pairingOnly);
   closeStore = () => store.close();
-  const bridge = new Bridge(config, store, new T3Cli(config.t3Binary), error);
+  const historyStore=pairingOnly ? undefined : new HistoryStore(join(config.dataDir,'history.sqlite'));
+  closeHistory=()=>historyStore?.close();
+  const history=historyStore ? new HistoryRecorder(config,historyStore,join(config.dataDir,'history.sqlite'),(chat,id)=>store.isOutgoing(chat,id)) : undefined;
+  const bridge = new Bridge(config, store, new T3Cli(config.t3Binary), error,history);
   let socket: ReturnType<typeof makeWASocket> | undefined;
   let connected = false, stopped = false, reconnects = 0, ackRetries = 0, openedAt = 0;
   const qrImage = join(config.dataDir, 'pairing-qr.png');
@@ -72,6 +79,7 @@ if (process.argv[2] === 'doctor') {
       quoted:quote as WAMessage, messageId:outgoing.id,
     });
     if (!result) throw new Error('WhatsApp did not confirm the send.');
+    try{history?.capture(result);}catch(e){error(e);}
     return result.message ?? {};
   }, error);
   function clearPairingQr() {
@@ -84,6 +92,7 @@ if (process.argv[2] === 'doctor') {
   process.on('unhandledRejection', e => { error(e); void shutdown(1); });
   const { state, saveCreds } = await useMultiFileAuthState(join(config.dataDir, 'auth'));
   if (stopped) process.exit(0);
+  history?.bind([state.creds.me?.id,state.creds.me?.lid].filter((id):id is string=>Boolean(id)));
   function diagnostic(event: string, details: Record<string,string|number|boolean|null> = {}) {
     // Explicit fields only. Never serialize errors, credentials, QR data, or raw messages.
     const record = {time:new Date().toISOString(),event,...details};
@@ -105,7 +114,7 @@ if (process.argv[2] === 'doctor') {
     const current = makeWASocket({
       auth: state, version, logger: pino({level:'silent'}),
       markOnlineOnConnect: false, syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
+      shouldSyncHistoryMessage: message => shouldImportHistory(Boolean(history?.enabled && history.options.importRecent),message.syncType),
       getMessage: async key => key.id ? store.message(key.id) : undefined,
     });
     socket = current;
@@ -140,7 +149,9 @@ if (process.argv[2] === 'doctor') {
       }
       if (update.connection === 'open') {
         clearPairingQr();
+        history?.bind([current.user?.id,current.user?.lid].filter((id):id is string=>Boolean(id)));
         diagnostic('connected');
+        if(history)diagnostic('history-ready',{enabled:history.enabled,retentionDays:history.options.retentionDays,recentImport:history.options.importRecent});
         connected = true; reconnects = 0; openedAt = Date.now();
         console.log('WhatsApp connected. Only configured groups and authorized senders can start tasks.');
         if (config.selfCommands) console.log(config.accountWide ? 'Account-wide mode: use @bot #project-name followed by a task in any personal chat, group, or Message yourself.' : 'Single-account mode: type @bot followed by a task in your configured chat.');
@@ -176,6 +187,10 @@ if (process.argv[2] === 'doctor') {
         });
       }
     });
+    current.ev.on('messaging-history.set', event=>{if(current===socket && !stopped && shouldImportHistory(Boolean(history?.enabled && history.options.importRecent),event.syncType))history?.import(event.messages);});
+    current.ev.on('messages.update', event=>{if(current===socket && !stopped)history?.update(event);});
+    current.ev.on('messages.delete', event=>{if(current===socket && !stopped)history?.delete(event);});
+    current.ev.on('chats.delete', chats=>{if(current===socket && !stopped)for(const jid of chats)history?.delete({jid,all:true});});
     current.ev.on('messages.upsert', event => {
       if (current !== socket || stopped) return;
       if (pairingOnly) {
@@ -188,7 +203,10 @@ if (process.argv[2] === 'doctor') {
       const ids = [current.user?.id, current.user?.lid].filter((id): id is string => Boolean(id)).map(jidNormalizedUser);
       let acceptedAny = false;
       for (const raw of event.messages) {
+        history?.capture(raw);
         const message = normalize(raw);
+        if(event.requestId || isMessageMutation(raw))continue;
+        if (message.timestamp>=startedAtSeconds && !store.isOutgoing(message.group,message.id))void history?.requestRecent(raw,(count,key,timestamp)=>current.fetchMessageHistory(count,key,timestamp));
         if (!shouldHandleUpsert(event.type, message, config.selfCommands, startedAtSeconds)) continue;
         const accepted = bridge.accept(message, ids);
         acceptedAny ||= accepted;
@@ -199,7 +217,7 @@ if (process.argv[2] === 'doctor') {
       if (acceptedAny) void worker.tick();
     });
   }
-  timer = setInterval(() => { void worker.tick(); }, config.pollIntervalMs);
+  timer = setInterval(() => { history?.prune(); void worker.tick(); }, config.pollIntervalMs);
   async function shutdown(code = 0) {
     if (stopped) return;
     stopped = true; clearPairingQr(); clearInterval(timer); clearTimeout(reconnectTimer);

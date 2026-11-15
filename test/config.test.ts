@@ -31,3 +31,9 @@ test('No project has a default workspace separate from optional project hints',(
   const c=read({allowedSenderJids:['100@s.whatsapp.net']});
   assert.equal(c.noProject,'~/.t3/scratch');assert.equal(projectCatalog(c).size,0);
 });
+
+test('history retention is configured per account installation with separate read and prompt bounds',()=>{
+  const c=read({...base,history:{retentionDays:30}});assert.equal(c.history?.retentionDays,30);assert.equal(c.history?.maxReadChars,12000);assert.equal(c.history?.maxPromptChars,8000);
+  assert.equal(read({...base,history:{retentionDays:0}}).history?.retentionDays,0);
+  assert.throws(()=>read({...base,history:{retentionDays:-1}}));assert.throws(()=>read({...base,history:{maxReadChars:1000000}}));
+});

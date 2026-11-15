@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import type {HistoryRecorder} from './history-recorder.js';
+import type {HistoryReference} from './history.js';
 import {mkdirSync} from 'node:fs';
 import {parseResponse,prepareDocuments,whatsappText,type Handoff,type Completion} from './responses.js';
 import { BufferJSON } from '@whiskeysockets/baileys';
@@ -9,11 +11,11 @@ import { Store, type Task } from './store.js';
 import type { T3 } from './t3.js';
 
 // Versioned payloads prevent old routing requests from being replayed under new semantics.
-type TaskMessage = Incoming & {bridgeVersion:2; projectContext?:ProjectContext; continueTaskId?:string;responseContract?:1;handoff?:Handoff;completion?:Completion};
+type TaskMessage = Incoming & {bridgeVersion:2; projectContext?:ProjectContext; continueTaskId?:string;responseContract?:1;handoff?:Handoff;completion?:Completion;historyContext?:HistoryReference};
 
 export class Bridge {
   private projects: Map<string,string>;
-  constructor(private config: Config, private store: Store, private t3: T3, private logError: (error: unknown) => void) {
+  constructor(private config: Config, private store: Store, private t3: T3, private logError: (error: unknown) => void,private history?:HistoryRecorder) {
     this.projects=projectCatalog(config);
   }
   private chatAllowed(chat: string): boolean {
@@ -68,12 +70,13 @@ export class Bridge {
 
     const context=this.store.context(m.group);
     const active=context?.task_id ? this.store.task(context.task_id) : undefined;
-    const parent=reference ?? (this.conversationTask(active) ? active : undefined);
+    const candidate=reference ?? (this.conversationTask(active) ? active : undefined);
+    const parent=candidate && this.isRouted(candidate) ? candidate : undefined;
     const mapping=this.mappedProject(m.group);
     const projectContext:ProjectContext | undefined=command.projects.length
       ? {source:'message',projects:command.projects}
       : mapping ? {source:'mapping',projects:[{name:[...this.projects].find(([,target])=>target===mapping)?.[0],target:mapping}]} : undefined;
-    const payload:TaskMessage={...m,text:command.instruction,bridgeVersion:2,projectContext,continueTaskId:parent?.id};
+    const payload:TaskMessage={...m,text:command.instruction,bridgeVersion:2,projectContext,continueTaskId:parent?.id,historyContext:this.history?.reference(m)};
     let accepted=false;
     this.store.atomic(()=>{
       const id=randomUUID();
@@ -84,6 +87,8 @@ export class Bridge {
   }
   isRouted(task: Task): boolean {
     if (!this.chatAllowed(task.group_jid)) return false;
+    const historyContext=(JSON.parse(task.payload,BufferJSON.reviver) as TaskMessage).historyContext;
+    if(historyContext && this.history && !this.history.acceptsAccount(historyContext.accountId))return false;
     if (!task.project) return task.state==='control' || task.state==='unsupported';
     return this.conversationTask(task);
   }
@@ -140,7 +145,7 @@ export class Bridge {
       this.store.setPayload(task.id,message);
       this.store.setState(task.id, 'submitting');
       try {
-        const result = await this.t3.submit(this.config.noProject,taskPrompt(message,this.config.selfCommands,message.text,message.projectContext,{outputDirectory,recentHandoffs:this.store.recentHandoffs(task.group_jid),completion:message.completion}),task.thread_id ?? undefined);
+        const result = await this.t3.submit(this.config.noProject,taskPrompt(message,this.config.selfCommands,message.text,message.projectContext,{outputDirectory,recentHandoffs:this.store.recentHandoffs(task.group_jid),completion:message.completion},message.historyContext),task.thread_id ?? undefined);
         task.thread_id = result.threadId;
         this.store.atomic(() => {
           this.store.submitted(task, result.threadId, result.runId);

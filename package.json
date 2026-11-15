@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
     "test": "node --import tsx --test test/*.test.ts",
-    "doctor": "node --import tsx src/main.ts doctor"
+    "doctor": "node --import tsx src/main.ts doctor",
+    "history": "node --import tsx src/history-cli.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",

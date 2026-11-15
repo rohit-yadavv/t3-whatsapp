@@ -14,5 +14,12 @@
   "routes": [],
   "pollIntervalMs": 15000,
   "maxMessageAgeSeconds": 300,
-  "noProject": "~/.t3/scratch"
+  "noProject": "~/.t3/scratch",
+  "history": {
+    "retentionDays": 30,
+    "maxReadMessages": 50,
+    "maxReadChars": 12000,
+    "maxPromptChars": 8000,
+    "importRecent": true
+  }
 }

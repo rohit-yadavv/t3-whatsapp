@@ -11,6 +11,14 @@ const route = z.union([
   z.object({groupJid:z.string().regex(/^\d+(?:-\d+)?@g\.us$/),project:target}).strict()
     .transform(value => ({chatJid:value.groupJid,project:value.project})),
 ]);
+const historySchema=z.object({
+  retentionDays:z.number().int().min(0).max(3650).default(30),
+  maxReadMessages:z.number().int().min(1).max(100).default(50),
+  maxReadChars:z.number().int().min(2000).max(30000).default(12000),
+  maxPromptChars:z.number().int().min(2000).max(16000).default(8000),
+  importRecent:z.boolean().default(true),
+}).strict();
+export type HistoryOptions=z.infer<typeof historySchema>;
 const schema = z.object({
   t3Binary:z.string().min(1).default('t3'),
   dataDir:z.string().default('.data'),
@@ -18,6 +26,7 @@ const schema = z.object({
   accountWide:z.boolean().default(false),
   // Accepted for old configs; per-chat conversation continuity is now always enabled.
   rememberContext:z.boolean().optional(),
+  history:historySchema.optional(),
   noProject:target.default('~/.t3/scratch'),
   allowedSenderJids:z.array(z.string().regex(/^\d+@(s\.whatsapp\.net|lid)$/)).min(1),
   projects:z.record(z.string().regex(aliasPattern),target).default({}),
@@ -29,6 +38,7 @@ const schema = z.object({
   if (new Set(config.routes.map(r=>r.chatJid)).size !== config.routes.length) ctx.addIssue({code:'custom',message:'Each chat must have exactly one configured mapping.'});
 });
 export type Config = z.infer<typeof schema>;
+export function historyOptions(config:Pick<Config,'history'>):HistoryOptions {return config.history ?? historySchema.parse({});}
 export function isSupportedChat(jid: string): boolean { return chatPattern.test(jid); }
 export function projectCatalog(config: Config): Map<string,string> {
   const catalog = new Map<string,string>();
