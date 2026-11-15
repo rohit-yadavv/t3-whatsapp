@@ -11,7 +11,7 @@ import type {Config} from '../src/config.js';
 import type {T3} from '../src/t3.js';
 
 const owner='100@s.whatsapp.net',chat='200@s.whatsapp.net',group='300@g.us';
-const config:Config={t3Binary:'t3',dataDir:'.data',selfCommands:true,accountWide:true,allowedSenderJids:[owner],projects:{website:'/website','mobile-app':'/mobile'},routes:[],pollIntervalMs:15000,maxMessageAgeSeconds:300};
+const config:Config={t3Binary:'t3',dataDir:'.data',rememberContext:false,selfCommands:true,accountWide:true,allowedSenderJids:[owner],projects:{website:'/website','mobile-app':'/mobile'},routes:[],pollIntervalMs:15000,maxMessageAgeSeconds:300};
 function own(id:string,text:string,quotedId?:string,jid=chat,quotedText='') {
   return normalize({key:{id,remoteJid:jid,fromMe:true},messageTimestamp:Math.floor(Date.now()/1000),message:{extendedTextMessage:{text,contextInfo:{stanzaId:quotedId,quotedMessage:quotedText ? {conversation:quotedText} : undefined}}}});
 }

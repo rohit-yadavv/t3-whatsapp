@@ -10,7 +10,7 @@ import {normalize} from '../src/messages.js';
 import type {Config} from '../src/config.js';
 import type {T3} from '../src/t3.js';
 
-const config: Config = {t3Binary:'t3',dataDir:'.data',accountWide:false,projects:{},selfCommands:true,allowedSenderJids:['100@s.whatsapp.net'],routes:[{chatJid:'300@g.us',project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300};
+const config: Config = {t3Binary:'t3',dataDir:'.data',rememberContext:false,accountWide:false,projects:{},selfCommands:true,allowedSenderJids:['100@s.whatsapp.net'],routes:[{chatJid:'300@g.us',project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300};
 function setup(t: TestContext) {
   const dir=mkdtempSync(join(tmpdir(),'t3-worker-'));
   const store=new Store(join(dir,'state.sqlite'));

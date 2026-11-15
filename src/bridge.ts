@@ -6,7 +6,7 @@ import { hasSelfPrefix, instructionText, taskPrompt, type Incoming } from './mes
 import { Store, type Task } from './store.js';
 import type { T3 } from './t3.js';
 
-type TaskMessage = Incoming & {routeProject?: string; instructionReady?: boolean; pendingRequestId?: string; referenceTaskId?: string};
+type TaskMessage = Incoming & {routeProject?: string; instructionReady?: boolean; pendingRequestId?: string; referenceTaskId?: string; continueTaskId?: string};
 
 export class Bridge {
   private projects: Map<string,string>;
@@ -23,24 +23,32 @@ export class Bridge {
   private label(project: string): string {
     return [...this.projects].find(([,value])=>value===project)?.[0] ?? 'selected project';
   }
-  private record(message: TaskMessage, project: string, state: string, reply?: string, thread?: string, effect?:()=>void): boolean {
+  private record(message: TaskMessage, project: string, state: string, reply?: string, thread?: string, effect?:(task:Task)=>void): boolean {
     const id=randomUUID();
     let accepted=false;
     const payload: TaskMessage={...message,instructionReady:true,routeProject:this.config.routes.find(route=>route.chatJid===message.group)?.project};
     this.store.atomic(()=>{
       accepted=this.store.add(id,payload,project,thread,state);
       if (!accepted) return;
-      effect?.();
-      if (reply) this.enqueue(this.store.task(id)!,reply);
+      const task=this.store.task(id)!;
+      effect?.(task);
+      if (reply) this.enqueue(task,reply);
     });
     return accepted;
   }
   private control(message: TaskMessage, reply: string, effect?:()=>void): boolean {
     return this.record(message,'','control',reply,undefined,effect);
   }
-  private work(message: Incoming, project: string, thread?: string, effect?:()=>void): boolean {
+  private work(message: TaskMessage, project: string, thread?: string, effect?:()=>void): boolean {
+    if (!message.text.trim()) return this.control(message,`Using #${this.label(project)}. What would you like to do?`,()=>{
+      if (this.config.rememberContext!==false) this.store.focusChat(message.group,project,thread);
+      effect?.();
+    });
     const reply=message.hasMedia ? 'This first version handles text only. Please describe the attachment in text and send @bot again.' : undefined;
-    return this.record(message,project,message.hasMedia ? 'unsupported' : 'queued',reply,thread,effect);
+    return this.record(message,project,message.hasMedia ? 'unsupported' : 'queued',reply,thread,task=>{
+      if (!message.hasMedia && this.config.rememberContext!==false) this.store.focusChat(message.group,project,thread,task.id);
+      effect?.();
+    });
   }
   private chooseProject(message: Incoming, reason='Which project should handle this?', reference?: Task): boolean {
     return this.record({...message,referenceTaskId:reference?.id},'','awaiting_project',`${reason} Reply to this message with #project-name, or cancel. Use @bot projects to list available names.`);
@@ -102,16 +110,21 @@ export class Bridge {
     if (command.kind==='map') {
       const project=this.projects.get(command.alias);
       if (!project) return this.control(replyMessage,'Unknown project. Use @bot projects to list available names.');
-      return this.control(replyMessage,`This chat now uses #${command.alias} for new tasks. A #project-name in a message overrides it for that task only.`,()=>this.store.mapChat(m.group,project));
+      return this.control(replyMessage,`This chat now uses #${command.alias} for new tasks. A #project-name in a message overrides it for that task only.`,()=>{this.store.mapChat(m.group,project);this.store.clearContext(m.group);});
     }
-    if (command.kind==='unmap') return this.control(replyMessage,'Chat mapping cleared. New tasks need a #project-name or I will ask you to choose.',()=>this.store.unmapChat(m.group));
-    const message={...m,text:command.instruction};
+    if (command.kind==='unmap') return this.control(replyMessage,'Chat mapping cleared. The next conversation will use No project unless you select a project.',()=>{this.store.unmapChat(m.group);this.store.clearContext(m.group);});
+    const forceNew=/^new(?:\s|$)/i.test(command.instruction);
+    const body=forceNew ? command.instruction.replace(/^new(?:\s+|$)/i,'').trim() : command.instruction;
+    const message: TaskMessage={...m,text:body};
     if (command.error) return this.chooseProject(message,command.error,reference);
-    if (!command.instruction) return this.control(replyMessage,'Add a task after the project name, for example: @bot #project-name explain this project.');
     const explicit=command.alias ? this.projects.get(command.alias) : undefined;
     if (command.alias && !explicit) return this.chooseProject(message,`Unknown project #${command.alias}.`,reference);
 
-    if (reference?.thread_id) {
+    if (forceNew && !body) {
+      if (explicit) return this.control(m,`New #${this.label(explicit)} conversation ready. What would you like to do?`,()=>this.store.focusChat(m.group,explicit));
+      return this.control(m,'Active conversation cleared. The next command will use the saved chat mapping or No project.',()=>this.store.clearContext(m.group));
+    }
+    if (reference?.thread_id && !forceNew) {
       if (![...this.projects.values()].includes(reference.project)) return this.chooseProject(message,'The original task project is no longer configured.',reference);
       if (explicit && explicit!==reference.project) {
         return this.confirmNewTask(message,explicit,reference);
@@ -119,9 +132,11 @@ export class Bridge {
       // Changing a chat mapping never moves an existing task to another project.
       return this.work(message,reference.project,reference.thread_id);
     }
-    const project=explicit ?? this.mappedProject(m.group);
+    const context=!forceNew && this.config.rememberContext!==false ? this.store.context(m.group) : undefined;
+    const useContext=context && (!explicit || context.project===explicit);
+    const project=explicit ?? (useContext ? context.project : undefined) ?? this.mappedProject(m.group) ?? this.config.noProject;
     if (!project || ![...this.projects.values()].includes(project)) return this.chooseProject(message);
-    return this.work(message,project);
+    return this.work({...message,continueTaskId:useContext ? context.task_id ?? undefined : undefined},project,useContext ? context.thread_id ?? undefined : undefined);
   }
   isRouted(task: Task): boolean {
     if (!this.chatAllowed(task.group_jid)) return false;
@@ -151,15 +166,26 @@ export class Bridge {
         this.store.setState(task.id, 'review');
         continue;
       }
+      const message = JSON.parse(task.payload, BufferJSON.reviver) as TaskMessage;
+      if (message.continueTaskId) {
+        const parent=this.store.task(message.continueTaskId);
+        if (!parent || parent.group_jid!==task.group_jid || parent.project!==task.project || ['review','unsupported','cancelled'].includes(parent.state)) {
+          this.store.atomic(()=>{this.store.setState(task.id,'review');this.enqueue(task,'I could not safely resume the earlier task. Select a thread explicitly or start a new conversation.');});
+          continue;
+        }
+        if (!parent.thread_id) continue;
+        task.thread_id=parent.thread_id;
+        this.store.attachThread(task.id,parent.thread_id);
+      }
       if (task.thread_id && busyThreads.has(task.thread_id)) continue;
       this.store.setState(task.id, 'submitting');
       try {
-        const message = JSON.parse(task.payload, BufferJSON.reviver) as TaskMessage;
-        const result = await this.t3.submit(task.project, taskPrompt(message, this.config.selfCommands, message.instructionReady ? message.text : undefined), task.thread_id ?? undefined);
+        const result = await this.t3.submit(task.project, taskPrompt(message, this.config.selfCommands, message.instructionReady ? message.text : undefined, {general:task.project===this.config.noProject}), task.thread_id ?? undefined);
         const followUp = Boolean(task.thread_id);
         task.thread_id = result.threadId;
         this.store.atomic(() => {
           this.store.submitted(task, result.threadId, result.runId);
+          this.store.bindContext(task,result.threadId);
           this.enqueue(task, `${followUp ? 'Follow-up sent' : 'Task sent'} to T3 Code (#${this.label(task.project)}).\nThread: ${result.threadId}`);
         });
         busyThreads.add(result.threadId);

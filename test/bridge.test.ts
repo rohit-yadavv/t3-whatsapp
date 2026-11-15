@@ -10,7 +10,7 @@ import type { Config } from '../src/config.js';
 import type { Snapshot, T3 } from '../src/t3.js';
 
 const bot = '100@s.whatsapp.net', owner = '200@s.whatsapp.net', group = '300@g.us';
-const config: Config = { t3Binary:'t3',dataDir:'.data',accountWide:false,projects:{},selfCommands:false,allowedSenderJids:[owner],routes:[{chatJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
+const config: Config = { t3Binary:'t3',dataDir:'.data',rememberContext:false,accountWide:false,projects:{},selfCommands:false,allowedSenderJids:[owner],routes:[{chatJid:group,project:'/project'}],pollIntervalMs:15000,maxMessageAgeSeconds:300 };
 function message(id = 'm1', options: {sender?: string;quoted?:string;mention?:boolean;text?:string} = {}) {
   return normalize({key:{id,remoteJid:group,participant:options.sender ?? owner},messageTimestamp:Math.floor(Date.now()/1000),message:{extendedTextMessage:{text:options.text ?? '@100 fix the signup button',contextInfo:{mentionedJid:options.mention === false ? [] : [bot],stanzaId:options.quoted,quotedMessage:options.quoted ? {conversation:'Signup fails on mobile'} : undefined}}}});
 }

@@ -16,6 +16,8 @@ const schema = z.object({
   dataDir:z.string().default('.data'),
   selfCommands:z.boolean().default(false),
   accountWide:z.boolean().default(false),
+  rememberContext:z.boolean().optional(),
+  noProject:target.optional(),
   allowedSenderJids:z.array(z.string().regex(/^\d+@(s\.whatsapp\.net|lid)$/)).min(1),
   projects:z.record(z.string().regex(aliasPattern),target).default({}),
   routes:z.array(route).default([]),
@@ -24,7 +26,7 @@ const schema = z.object({
 }).strict().superRefine((config,ctx) => {
   if (config.accountWide && !config.selfCommands) ctx.addIssue({code:'custom',message:'Account-wide commands require selfCommands: true.'});
   if (new Set(config.routes.map(r=>r.chatJid)).size !== config.routes.length) ctx.addIssue({code:'custom',message:'Each chat must have exactly one configured mapping.'});
-  if (!config.routes.length && !Object.keys(config.projects).length) ctx.addIssue({code:'custom',message:'Configure at least one project.'});
+  if (!config.routes.length && !Object.keys(config.projects).length && !config.noProject) ctx.addIssue({code:'custom',message:'Configure at least one project.'});
 });
 export type Config = z.infer<typeof schema>;
 export function isSupportedChat(jid: string): boolean { return chatPattern.test(jid); }
@@ -34,6 +36,10 @@ export function projectCatalog(config: Config): Map<string,string> {
     const alias=name.toLowerCase();
     if (catalog.has(alias)) throw new Error(`Duplicate project alias: ${alias}`);
     catalog.set(alias,project);
+  }
+  if (config.noProject) {
+    if (catalog.has('no-project') && catalog.get('no-project')!==config.noProject) throw new Error('The no-project alias is reserved for the No project workspace.');
+    catalog.set('no-project',config.noProject);
   }
   for (const route of config.routes) {
     if ([...catalog.values()].includes(route.project)) continue;
