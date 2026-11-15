@@ -2,118 +2,136 @@
 
 **Your WhatsApp companion for T3 Code.**
 
-Use your existing WhatsApp number: type `@bot` followed by a task in a configured group to start work. Quote a message to include its text as context. Reply to the bot’s acknowledgement or result to continue the same T3 thread.
+From your existing WhatsApp account, type `@bot #project-name` followed by a task in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Replies to bot updates continue the same T3 thread.
 
-Early local prototype, built for a personal Mac workflow. Uses Baileys for WhatsApp and T3 Code’s supported local `t3 thread` CLI. No separate model is used to route or format messages.
+A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Routing, project selection, and chat commands use ordinary code without separate AI calls. Agent tasks consume the provider allowance or API billing configured in T3 Code.
 
-## What works in this version
+## Project selection
 
-- Explicit single-account `@bot` commands, plus optional separate-account real contact mentions.
-- Explicit group-to-project routes and sender allowlists, including WhatsApp LID aliases.
-- A separate T3 thread for a fresh task; follow-ups reuse the original thread.
-- Quoted text context, acknowledgements, and the final assistant response back to WhatsApp.
-- SQLite task mappings and an outbox survive restarts.
-- Duplicate incoming messages are ignored; historical, stale, generated bot replies, and unauthorized messages do not start tasks.
-- T3 permission/input requests direct you to the T3 app. The bridge never approves prompts.
+For a new task:
 
-Text only for now. Attachments and quoted attachments are explicitly rejected; voice transcription, remote approvals, `/status` commands, worktree selection, and installation as a macOS service are future work. A follow-up waits until its preceding WhatsApp request finishes. If the thread advances to a different run in the desktop app, the bridge asks you to review there rather than sending a potentially unrelated answer.
+1. An explicit `#project-name` selects the project for that task.
+2. Otherwise, use the chat's saved mapping.
+3. If neither exists, ask which project before doing work. There is no global default and no AI guessing.
+
+A project hashtag never changes the saved mapping. Project names match the aliases in `config.json`, case-insensitively. Put the selector immediately after `@bot`; a known alias also works elsewhere in the instruction. Unknown leading names and conflicting selectors ask for a choice instead of falling back to a mapping. Quoted issue text never controls project selection.
+
+| Command | Result |
+| --- | --- |
+| `@bot #website fix this` | New task in `website`, without changing the chat mapping |
+| `@bot use website for this chat` | Save the chat's project mapping |
+| `@bot fix this` | Use the saved mapping, or ask which project |
+| `@bot projects` | List configured project names; no agent task |
+| `@bot unmap this chat` | Clear the chat mapping, including a configured fallback |
+
+When asked which project, reply to that bot message with `#website`. The bot resumes your original instruction and quoted issue; you do not need to repeat them. Choosing a project this way does not save a permanent chat mapping. Reply `cancel` to discard a pending task. Invalid choices can be corrected by replying to the latest bot prompt. Choices and chat mappings survive restarts.
+
+Replies to existing bot task updates keep their original project, even if the chat's mapping changes. If your reply specifies another project, the bot asks whether to create a **new** task. Reply `new` to confirm or `cancel` to leave the original thread alone. A thread's project is never silently switched.
+
+**Responses are posted in the chat where you sent the command.** Everyone in that chat can see them. Use Message yourself when the task or result should stay private.
 
 ## Requirements
 
-- Node.js 22.13+ (uses built-in `node:sqlite`) and pnpm 12.21.0.
-- T3 Code running locally, with `t3 thread` support and the target projects already registered.
-- A paired WhatsApp account in your chosen group. With `selfCommands: true`, use that same account to type `@bot` commands. A separate bot number is optional.
+- Node.js 22.13+ and pnpm 12.21.0.
+- T3 Code running locally with `t3 thread` support and your target projects registered.
+- A paired WhatsApp account. In account-wide mode, only messages from your own authenticated account can issue commands. Other participants cannot trigger work by typing `@bot`.
 
-Baileys uses WhatsApp’s linked-device protocol without official Meta support; account restrictions and protocol changes are possible. A dedicated number limits account exposure, although single-account mode is supported. The local bridge adds no AI calls, but tasks still consume the provider allowance or API billing configured in T3 Code.
+Baileys uses WhatsApp's linked-device protocol without official Meta support. Account restrictions and protocol changes are possible. A dedicated number limits exposure, although using your existing account is supported.
 
 ## Setup
-
-From this folder:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm pair
 ```
 
-Pairing mode opens a full-size black-on-white QR image in Preview on macOS. Scan that image rather than the small terminal blocks. It is also saved locally at `.data/pairing-qr.png` and refreshed when WhatsApp issues another QR. Keep pairing mode running and use the newest QR. The image is deleted on successful pairing or normal shutdown.
+Pairing mode opens a full-size black-on-white QR image in Preview on macOS. Scan that image from WhatsApp → Linked devices, rather than the small terminal blocks. The image is also saved at `.data/pairing-qr.png` and refreshed when WhatsApp issues a new QR. Keep pairing running and use the newest image. It is removed after pairing or normal shutdown.
 
-Scan the QR **locally** from the bot account’s WhatsApp → Linked devices. The QR grants account access; keep it private. Pairing mode does not start T3 tasks or send messages. It prints joined group IDs. For single-account mode, use the printed bot identifiers as your allowed sender IDs. In separate-account mode, send a message from your personal account in the intended group while pairing mode runs to print its sender identifiers. These setup identifiers stay in the terminal.
+The QR grants account access: keep it private. Pairing mode never starts T3 tasks or sends saved replies. It prints the paired account identifiers and joined group IDs locally. For separate-account setup, messages sent by your personal account in a group also print its sender identifiers.
 
-Press Ctrl+C. Then:
+Press Ctrl+C, then create your private configuration:
 
 ```sh
 cp config.example.json config.json
 ```
 
-Edit `config.json`:
+Edit these fields:
 
-- `t3Binary`: the absolute CLI path. Use `t3` if it is on your PATH, or set an absolute path such as `/Users/your-name/.t3/bin/t3`.
-- `selfCommands`: `true` for your existing account with typed `@bot` commands; `false` for a separate bot account using real contact mentions.
-- `allowedSenderJids`: in single-account mode, use the paired account identifiers. In separate-account mode, use your personal sender identifiers. Remove all example entries.
-- `routes`: the group ID and the registered T3 project path or ID. One route per group.
-- `dataDir`: session and database directory, relative to the config file. Default `.data` matches pairing mode when run from this folder. For a custom pairing directory use `T3_WHATSAPP_DATA_DIR=/absolute/path pnpm pair`.
+- `t3Binary`: `t3` if it is on your PATH, or an absolute path such as `/Users/your-name/.t3/bin/t3`.
+- `selfCommands`: `true` for typed `@bot` commands from the paired account.
+- `accountWide`: `true` to accept your own commands in personal chats, groups, and Message yourself. This requires `selfCommands: true`. Status broadcasts and channels are excluded.
+- `allowedSenderJids`: the paired account identifiers printed during pairing. Remove all example values. At least one must match the connected account.
+- `projects`: project aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. The catalog is explicit; it does not automatically discover newly added T3 projects.
+- `routes`: optional initial chat mappings, for example `{"chatJid":"CHAT_ID","project":"PROJECT_PATH_OR_ID"}`. Account-wide mode does not require any routes. Saved `use ... for this chat` commands override configured mappings.
+- `dataDir`: session and database directory, relative to the config file. Default `.data` matches pairing mode when run from this folder. For another pairing directory use `T3_WHATSAPP_DATA_DIR=/absolute/path pnpm pair`.
 
-Keep config and session data private. They are gitignored. The process restricts new files to your user. Start with a project whose default T3 permissions and model you are comfortable using from WhatsApp; the bridge inherits those defaults.
+Keep config and session data private. They are gitignored. The bridge inherits each target project's default model and permissions in T3 Code.
 
 ```sh
 pnpm run doctor
 pnpm dev
 ```
 
-`pnpm run doctor` validates config (plain `pnpm doctor` runs pnpm’s own diagnostics) and reads the configured T3 projects without creating tasks. For another config file, set `T3_WHATSAPP_CONFIG=/absolute/path/config.json`.
+Use `pnpm run doctor`: plain `pnpm doctor` runs pnpm's own diagnostics. The project check validates every catalog target without starting tasks. Set `T3_WHATSAPP_CONFIG=/absolute/path/config.json` to use another configuration file. Restart the bridge after editing config.
 
-## Try the flow
+## First task
 
-With `selfCommands: true` (the example configuration):
+In any personal chat, group, or Message yourself, send:
 
-1. From the paired account, type `@bot Explain this project briefly. Don’t change any files.` in the configured group. No contact mention selection is needed.
-2. You can also quote a text bug report and type `@bot investigate this`.
-3. Replies are marked `[T3 Bot]` because both your instructions and the automated replies come from your number.
-4. Reply to an acknowledgement or result to continue its thread. A new `@bot` prefix is optional for replies to bot output. Ordinary conversations and unprefixed replies to your own instructions are ignored.
+```text
+@bot #website Explain this project briefly. Don't change any files.
+```
 
-Single-account mode only accepts your authenticated own-account messages in configured groups. Other group participants cannot start work, even by typing `@bot`. Generated outgoing IDs are stored before sending and rejected as incoming commands, including after a restart, to prevent reply loops. New self-commands from before the bridge starts are not replayed: send a fresh command after it connects. Disconnected commands may be recovered within the configured age window while the same process is alive.
+Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `[T3 Bot]`, because commands and replies use your number. Reply to an acknowledgement or result to continue that task; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
 
-With `selfCommands: false`, use a separate personal sender and bot number. Select the bot from the contact mention picker for new tasks. Plain typed `@bot` is not sufficient in that mode.
+Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Existing queued work and pending choices are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
 
-If a task stops for a T3 question or approval, answer in T3 Code; sending “yes” in WhatsApp never approves permission prompts.
+Keep the Mac awake, online, and T3 Code running. This version runs in the foreground. If T3 asks a question or needs permission, answer in T3 Code; typing “yes” in WhatsApp never approves a permission prompt.
 
-Keep the Mac awake, online, and T3 Code running. This version is a foreground process.
+## Restricted or separate-account mode
 
-### If WhatsApp says “Couldn't link device”
+Set `accountWide: false` to restrict the bridge to chats listed in `routes`. With `selfCommands: false`, use a separate personal sender and bot number, allowlist your personal sender IDs, and select the bot contact from the mention picker for new tasks. Plain typed `@bot` is insufficient in that mode.
 
-Restart `pnpm pair` and scan the newest full-size QR image in Preview. If the camera does not recognize the terminal QR, open the image with `open .data/pairing-qr.png` from another terminal while pairing keeps running. The bridge fetches the current WhatsApp Web protocol version once at startup, retains it for reconnects, and handles the normal post-pairing restart (515) after saving credentials. It falls back to the bundled version if the public lookup is unavailable.
+Old configs containing `routes[].groupJid` are read as `chatJid` mappings. If `projects` is absent, simple aliases are derived from route project folder names. New configurations should define the catalog explicitly.
 
-Connection and command-decision diagnostics are printed and written to `.data/connection.ndjson`. They contain only timestamps, lifecycle events, protocol version, disconnect codes, allowlisted stream-error labels, and command acceptance flags—no QR, session secrets or message content. A fresh scan is still needed to verify a pairing fix. If linking fails again, use those status lines to diagnose it; do not share the QR or files inside `.data/auth`. Existing credentials are never deleted automatically.
+## Recovery and privacy
 
-## Verification
+Only one bridge instance may use a data directory. Stop `pnpm pair` before starting `pnpm dev`. Normal shutdown releases `.data/run.lock`. If the process crashed, confirm the PID in that file has stopped before removing the lock.
+
+Ambiguous T3 submissions and WhatsApp sends are held for review rather than automatically repeated, because the external operation may already have succeeded. Removing a project from the catalog holds its persisted work and replies for review. Chat mapping changes affect new tasks; existing threads retain their original project. Restricted-mode configured route changes retain conservative recovery for old work.
+
+If an existing T3 thread advances to another run in the desktop app, the bot asks you to review there rather than sending an unrelated answer. Long results are split and capped; the full result remains in T3 Code. Shutdown stops further submissions and waits up to ten seconds for in-flight bridge operations and credential writes. Unfinished side effects require review on restart.
+
+`.data/bridge.sqlite` stores accepted requests, quoted context, mappings, project-choice prompts, and replies in plaintext with no automatic retention cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
+
+New files are restricted to your Mac user. The prototype uses Baileys's multi-file auth helper; a transactional auth store is future work. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
+
+### Linking or connection problems
+
+If the camera cannot recognize the terminal QR, use the full-size image. While pairing runs, open it with `open .data/pairing-qr.png` from another terminal if necessary.
+
+The bridge fetches WhatsApp Web's current protocol version at startup, retains it across reconnects, and falls back to the bundled version if lookup fails. The normal post-pairing restart (515) waits for credentials to be saved. Known `Stream Errored (ack)` failures with code 500 receive bounded retries; a healthy connection lasting at least one minute resets that budget. Unknown bad-session errors, logout, and restriction codes stop without deleting credentials.
+
+See `.data/connection.ndjson` for diagnostics. Do not share QR images or auth files.
+
+## Verification and current limits
 
 ```sh
 pnpm check
 pnpm test
 pnpm build
-pnpm start
 ```
 
-Automated tests cover authorization, own-message loop prevention, quoted context, follow-ups, pairing isolation, shutdown, project-route changes, crash-safe attachment rejection, repeated approval notices, Unicode, CLI validation/timeouts, and startup lock cleanup. `pnpm check` type-checks both source and tests. They use a fake T3 adapter and synthetic WhatsApp messages; they do not prove a live account pairing or end-to-end WhatsApp delivery.
+`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, project selection, durable choices, mappings, task continuity, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
-## Recovery and privacy
+Text tasks only. Attachments, voice transcription, remote permission approvals, worktree selection, private cross-chat result routing, automatic project discovery, and a macOS background service are not implemented. Project choices and mapping commands use no extra AI calls.
 
-Only one bridge instance may use a data directory. If it crashed and left `.data/run.lock`, inspect its PID and confirm the old process has stopped before deleting that lock. Normal Ctrl+C removes it. Pairing mode never processes saved tasks or replies. Shutdown stops further submissions and waits up to ten seconds for in-flight bridge operations and credential writes; unfinished side effects require review on restart.
+## Contributing and references
 
-An interrupted or ambiguous T3 submission is marked `review` in SQLite and is **not automatically retried**, because the task may already exist. An ambiguous outgoing send is likewise held in the outbox. Inspect T3/WhatsApp before manually retrying. Queued work and confirmed running tasks resume on restart; results pending in the outbox are sent when connected. Changing/removing a group’s project route holds its old tasks and replies for review, so they cannot run or leak results into the new route. This is conservative recovery, not a guarantee of exactly-once delivery.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md). Commits use `<type>: <short description>`.
 
-`.data/bridge.sqlite` stores accepted instructions, quoted context, mappings, and responses in plaintext; `.data/auth` contains WhatsApp credentials. Do not upload either. There is no automatic retention cleanup yet. Baileys logging is silenced so it cannot dump raw group messages to the terminal. Pairing mode deliberately prints identifiers needed for setup.
+- [Baileys](https://github.com/WhiskeySockets/Baileys), pinned to `7.0.0-rc14`.
+- [T3 host scripting documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md).
+- Related work: [Toucan Router](https://github.com/salalaslam/toucan-router). Its documentation informed the integration comparison; this is a separate implementation. No Toucan code or credentials are bundled.
 
-Baileys’s multi-file auth helper is used for this single-user prototype. It should be replaced with a transactional auth store before larger deployments. The bridge does not read or modify T3’s internal database.
-
-## Design and references
-
-- WhatsApp transport: [Baileys](https://github.com/WhiskeySockets/Baileys), pinned to `7.0.0-rc14` in the lockfile.
-- T3 integration: [`t3 thread` host scripting documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md).
-- Related work: [Toucan Router](https://github.com/salalaslam/toucan-router). Its WhatsApp and T3 setup documentation informed the comparison; this is a separate implementation focused on WhatsApp mentions and reply-to-thread continuity.
-
-The WhatsApp transport, routing/store, and T3 adapter are separate modules so the integration can evolve without rewriting task routing. No code or credentials from Toucan are bundled.
-
-Dependency policy: prefer current stable releases and commit the lockfile. Baileys is an explicit exception: its latest published release is `7.0.0-rc14`; the stable 6.7.24 line requires a transitive Git dependency rejected by pnpm’s default security policy. We currently retain rc14 without disabling that policy. Revisit when a compatible stable release is available.
-
-Connection recovery: a known Baileys `Stream Errored (ack)` with code 500 retries up to three times in a short-lived failure sequence. A connection healthy for at least one minute resets that retry budget. Unknown/bad-session 500s and explicit logout/restriction codes stop without deleting credentials.
+Dependency policy: prefer stable releases and commit the lockfile. Baileys remains an explicit exception: the stable 6.7.24 line requires a transitive Git dependency blocked by pnpm's default policy, so the current release candidate is retained without disabling those checks.
