@@ -90,7 +90,7 @@ export class Bridge {
     const capped = characters.slice(0, 12000);
     if (characters.length > 12000) capped.push(...Array.from('\n[More in T3 Code]'));
     for (let i = 0; i < capped.length; i += 3000) {
-      const prefix = this.config.selfCommands ? '[T3 Bot]\n' : '';
+      const prefix = this.config.selfCommands ? '🤖 ' : '';
       this.store.outgoing('3EB0' + randomBytes(16).toString('hex').toUpperCase(), task, prefix + capped.slice(i, i + 3000).join(''));
     }
   }

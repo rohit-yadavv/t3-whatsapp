@@ -100,7 +100,7 @@ In any personal chat, group, or Message yourself, send `@bot hi`, or provide a p
 @bot #website Explain this project briefly. Don't change any files.
 ```
 
-Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `[T3 Bot]`, because commands and replies use your number. Reply to a bot response to continue that conversation; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
+Or reply to an issue message with `@bot #website resolve this`. Bot messages begin with `🤖`, because commands and replies use your number. Reply to a bot response to continue that conversation; no new `@bot` prefix is required for replies to bot updates. Ordinary conversations and unprefixed replies to your own instructions are ignored.
 
 Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Accepted conversation messages and replies are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
 

@@ -121,7 +121,7 @@ test('own replies to bot answers continue the task and generated results never l
   assert.equal(store.pending().length,0);
   assert.equal(bridge.accept(own('normal-reply','thanks','own1'),[bot]),false,'plain replies to user messages are ignored');
   t3.snapshot.thread.status='completed';t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'@bot This is the result'}];
-  await bridge.collectResults();const result=store.pending()[0];assert.match(result.text,/^\[T3 Bot\]/);
+  await bridge.collectResults();const result=store.pending()[0];assert.match(result.text,/^🤖 /);
   assert.equal(bridge.accept(own(result.id,result.text,'own1'),[bot]),false);
   assert.equal(bridge.accept(own(result.id,'@bot fake echo','own1'),[bot]),false,'recorded outgoing ID blocks a command-like echo');
   assert.equal(bridge.accept(own('follow','Also explain tests',result.id),[bot]),true);
