@@ -2,6 +2,7 @@
 
 Ready-to-use PNG images for LinkedIn, the project README, and other posts.
 
+- `team-chat-light.png`: minimal light-theme team conversation. A manager reports a checkout bug; you quote the message and instruct the bot to investigate and open a PR. Preferred direction after review. Prompt: `team-chat-light-prompt.md`.
 - `linkedin-overview.png`: square overview explaining delegation from WhatsApp to T3 Code.
 - `readme-workflow.png`: wide illustration showing a task sent from WhatsApp, work in T3 Code on your computer, and a requested file returned to chat.
 
@@ -12,7 +13,7 @@ These are AI-generated illustrations, not screenshots of a live session. They co
 From the root README:
 
 ```markdown
-![Send tasks from your own WhatsApp account to T3 Code on your computer; request updates and files back in chat.](assets/social/readme-workflow.png)
+![Reply to a team bug report with an instruction to investigate and open a PR; T3 WhatsApp starts the investigation in T3 Code.](assets/social/team-chat-light.png)
 ```
 
 ## Suggested post caption
