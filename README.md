@@ -4,7 +4,9 @@
 
 # T3 WhatsApp
 
-Use T3 Code from WhatsApp. Send tasks and continue agent conversations in your projects and threads directly from existing chats and groups, using your own WhatsApp account.
+**Your WhatsApp companion for T3 Code.**
+
+Send tasks and continue agent conversations in your projects and threads directly from existing chats and groups, using your own WhatsApp account.
 
 ## Setup
 
