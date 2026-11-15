@@ -47,7 +47,7 @@ export class Store {
   bindContext(task: Task, thread: string) {
     this.db.prepare('UPDATE chat_context SET thread_id=? WHERE chat_jid=? AND task_id=?').run(thread,task.group_jid,task.id);
   }
-  attachThread(id: string, thread: string) { this.db.prepare('UPDATE tasks SET thread_id=? WHERE id=?').run(thread,id); }
+  attachThread(id: string, thread: string | null) { this.db.prepare('UPDATE tasks SET thread_id=? WHERE id=?').run(thread,id); }
   isOutgoing(group: string, id?: string): boolean {
     return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE group_jid=? AND id=?').get(group, id));
   }

@@ -17,6 +17,7 @@ export function setup(t:TestContext,settings:Config=config) {
   let store=new Store(path);
   const calls:{project:string;prompt:string;thread?:string;threadId:string;runId:string}[]=[];
   const status=new Map<string,'running'|'completed'>();
+  const settled=new Set<string>();
   const errors:unknown[]=[];
   const t3:T3={
     submit:async(project,prompt,thread)=>{
@@ -26,10 +27,10 @@ export function setup(t:TestContext,settings:Config=config) {
     },
     show:async thread=>{
       const call=calls.findLast(c=>c.threadId===thread);
-      return {thread:{threadId:thread,status:status.get(thread) ?? 'running',latestRunId:call?.runId ?? 'external',pendingRequestCount:0},messages:call ? [{role:'assistant',runId:call.runId,text:'AI response'}] : []};
+      return {thread:{threadId:thread,status:status.get(thread) ?? 'running',latestRunId:call?.runId ?? 'external',settled:settled.has(thread),pendingRequestCount:0},messages:call ? [{role:'assistant',runId:call.runId,text:'AI response'}] : []};
     },
   };
   let bridge=new Bridge(settings,store,t3,e=>errors.push(e));
   t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true});});
-  return {calls,t3,errors,get store(){return store;},get bridge(){return bridge;},finish(thread='t1'){status.set(thread,'completed');},restart(){store.close();store=new Store(path);bridge=new Bridge(settings,store,t3,e=>errors.push(e));}};
+  return {calls,t3,errors,get store(){return store;},get bridge(){return bridge;},finish(thread='t1'){status.set(thread,'completed');},settle(thread='t1'){settled.add(thread);},restart(){store.close();store=new Store(path);bridge=new Bridge(settings,store,t3,e=>errors.push(e));}};
 }

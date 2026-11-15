@@ -8,6 +8,7 @@ const snapshotSchema = z.object({
     status:z.enum(['idle','preparing','starting','queued','running','waiting','completed','failed','cancelled','interrupted','rolled_back']),
     latestRunId:z.string().nullable(),
     pendingRequestCount:z.number().int().nonnegative(),
+    settled:z.boolean(),
     link:z.string().nullable().optional(),
   }),
   messages:z.array(z.object({role:z.enum(['user','assistant']),runId:z.string().nullable(),text:z.string()})),

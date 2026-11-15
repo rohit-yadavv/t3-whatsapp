@@ -17,7 +17,7 @@ function setup(t: TestContext) {
   const submissions:string[]=[], polls:string[]=[], sends:string[]=[];
   const t3:T3={
     submit:async(_project,_prompt,thread)=>{submissions.push(thread ?? 'new');return {threadId:thread ?? 't1',runId:'r1'};},
-    show:async thread=>{polls.push(thread);return {thread:{threadId:thread,status:'running',latestRunId:'r1',pendingRequestCount:0},messages:[]};},
+    show:async thread=>{polls.push(thread);return {thread:{threadId:thread,status:'running',latestRunId:'r1',settled:false,pendingRequestCount:0},messages:[]};},
   };
   const bridge=new Bridge(config,store,t3,()=>{});
   let enabled=true;
@@ -43,7 +43,7 @@ test('pairing/disabled worker leaves queued, running and outgoing work untouched
 test('shutdown during a result poll does not start queued T3 work', async t=>{
   const s=setup(t);s.queue('queued');
   const running=s.queue('running');s.store.submitted(running,'t0','r0');
-  s.t3.show=async thread=>{s.disable();return {thread:{threadId:thread,status:'running',latestRunId:'r0',pendingRequestCount:0},messages:[]};};
+  s.t3.show=async thread=>{s.disable();return {thread:{threadId:thread,status:'running',latestRunId:'r0',settled:false,pendingRequestCount:0},messages:[]};};
   await s.worker.tick();assert.equal(s.submissions.length,0);assert.equal(s.store.tasks('queued').length,1);
 });
 test('shutdown during submission permits that task to settle but starts no subsequent tasks', async t=>{

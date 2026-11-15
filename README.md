@@ -49,7 +49,7 @@ Send commands in a chat, group, or **Message yourself**. Reply to an issue to in
 @bot what did you find?
 ```
 
-- Each new chat or group gets its own **No project** conversation. Later messages in that chat continue it, including after restart.
+- Each new chat or group gets its own **No project** conversation. Later messages continue it, including after restart. If you settle that thread in T3, the next message starts a fresh No project conversation.
 - Mention projects and thread titles naturally; the agent uses T3 tools to find them and perform your request.
 - `#project` and chat mappings add project context to the prompt. The conversation stays in No project.
 - Reply to an older bot message to continue its conversation, or send exactly `@bot new` to reset this chat.

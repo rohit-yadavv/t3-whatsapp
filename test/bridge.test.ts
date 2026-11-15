@@ -16,7 +16,7 @@ function message(id = 'm1', options: {sender?: string;quoted?:string;mention?:bo
 }
 class FakeT3 implements T3 {
   calls: {project:string;prompt:string;thread?:string}[] = [];
-  snapshot: Snapshot = {thread:{threadId:'t1',status:'running',latestRunId:'r1',pendingRequestCount:0},messages:[]};
+  snapshot: Snapshot = {thread:{threadId:'t1',status:'running',latestRunId:'r1',settled:false,pendingRequestCount:0},messages:[]};
   async submit(project:string,prompt:string,thread?:string) { this.calls.push({project,prompt,thread}); return {threadId:thread ?? 't1',runId:'r'+this.calls.length}; }
   async show() { return this.snapshot; }
 }

@@ -112,3 +112,36 @@ test('unsupported media cannot change a chat mapping or reset an active conversa
   s.bridge.accept({...own('mapping','@bot use mobile for this chat'),hasMedia:true},[owner]);
   assert.equal(s.store.context(chat)?.thread_id,'t1');assert.equal(s.store.chatProject(chat),'/website');assert.equal(s.store.tasks('unsupported').length,2);
 });
+
+test('a settled conversation starts fresh while retaining the mapping hint and quoted request',async t=>{
+  const s=setup(t);s.store.mapChat(chat,'/website');s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();
+  s.finish();await s.bridge.collectResults();s.settle();s.restart();
+  s.bridge.accept(own('next','@bot save this','issue',chat,'Checkout needs a fix'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls.length,2);assert.equal(s.calls[1].project,'/general');assert.equal(s.calls[1].thread,undefined);
+  assert.equal(data(s.calls[1].prompt).quotedContext,'Checkout needs a fix');assert.equal(data(s.calls[1].prompt).projectContext.projects[0].target,'/website');
+  assert.equal(s.store.context(chat)?.thread_id,'t2');
+});
+test('replying to a settled bot conversation starts fresh without sending to its old thread',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();const ack=s.store.pending()[0];
+  s.finish();await s.bridge.collectResults();s.settle();s.bridge.accept(own('reply','explain more',ack.id),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls[1].thread,undefined);assert.equal(s.calls[1].project,'/general');
+});
+test('queued follow-ups share the replacement conversation when the old one is settled',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('next','@bot next topic'),[owner]);s.bridge.accept(own('follow','@bot explain that'),[owner]);s.settle();
+  await s.bridge.submitQueued();assert.equal(s.calls.length,2);assert.equal(s.calls[1].thread,undefined);
+  s.finish('t2');await s.bridge.collectResults();await s.bridge.submitQueued();
+  assert.equal(s.calls.length,3);assert.equal(s.calls[2].thread,'t2');
+});
+test('a failed settlement lookup never sends to the old thread or starts duplicate work',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('next','@bot continue'),[owner]);s.t3.show=async()=>{throw new Error('T3 unavailable');};
+  await s.bridge.submitQueued();await s.bridge.submitQueued();assert.equal(s.calls.length,1);assert.equal(s.store.tasks('review').length,1);
+  assert.ok(s.store.pending().some(m=>m.text.includes('No message was sent')));
+});
+test('shutdown during settlement lookup does not submit another turn',async t=>{
+  const s=setup(t);s.bridge.accept(own('first','@bot hi'),[owner]);await s.bridge.submitQueued();s.finish();await s.bridge.collectResults();
+  s.bridge.accept(own('next','@bot continue'),[owner]);let enabled=true;const show=s.t3.show;
+  s.t3.show=async thread=>{const snapshot=await show(thread);enabled=false;return snapshot;};
+  await s.bridge.submitQueued(()=>enabled);assert.equal(s.calls.length,1);assert.equal(s.store.tasks('queued').length,1);
+});

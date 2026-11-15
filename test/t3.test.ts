@@ -45,7 +45,18 @@ test('adapter rejects malformed snapshots and responses for another thread', asy
     await assert.rejects(cli.submit('/project','hello','expected'),/Unexpected T3 submission/);
     respond({thread:{threadId:'expected'},messages:[]});
     await assert.rejects(cli.show('expected'),/Unexpected T3 thread snapshot/);
-    respond({thread:{threadId:'other',status:'completed',latestRunId:'r1',pendingRequestCount:0},messages:[]});
+    respond({thread:{threadId:'other',status:'completed',latestRunId:'r1',settled:false,pendingRequestCount:0},messages:[]});
     await assert.rejects(cli.show('expected'),/Unexpected T3 thread snapshot/);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test('adapter retains settlement metadata and rejects snapshots without it',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'t3-settlement-')),binary=join(dir,'fake-t3');
+  const respond=(value:unknown)=>writeFileSync(binary,`#!${process.execPath}\nconsole.log(${JSON.stringify(JSON.stringify(value))})\n`,{mode:0o700});
+  try {
+    const cli=new T3Cli(binary);
+    const thread={threadId:'expected',status:'completed',latestRunId:'r1',pendingRequestCount:0};
+    respond({thread:{...thread,settled:true},messages:[]});assert.equal((await cli.show('expected')).thread.settled,true);
+    respond({thread,messages:[]});await assert.rejects(cli.show('expected'),/Unexpected T3 thread snapshot/);
   } finally {rmSync(dir,{recursive:true,force:true});}
 });

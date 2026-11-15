@@ -114,6 +114,24 @@ export class Bridge {
         this.store.attachThread(task.id,parent.thread_id);
       }
       if (task.thread_id && busyThreads.has(task.thread_id)) continue;
+      if (task.thread_id) {
+        try {
+          const snapshot=await this.t3.show(task.thread_id);
+          if (!shouldContinue()) break;
+          // Settlement closes the conversation; a normal completed turn does not.
+          if (snapshot.thread.settled) {
+            task.thread_id=null;
+            this.store.attachThread(task.id,null);
+          }
+        } catch (error) {
+          this.logError(error);
+          this.store.atomic(()=>{
+            this.store.setState(task.id,'review');
+            this.enqueue(task,'I could not verify whether the previous conversation is settled. No message was sent. Check T3 Code, or send @bot new to start fresh.');
+          });
+          continue;
+        }
+      }
       this.store.setState(task.id, 'submitting');
       try {
         const result = await this.t3.submit(this.config.noProject,taskPrompt(message,this.config.selfCommands,message.text,message.projectContext),task.thread_id ?? undefined);
