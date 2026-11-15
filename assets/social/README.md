@@ -2,6 +2,7 @@
 
 Ready-to-use PNG images for LinkedIn, the project README, and other posts.
 
+- `whatsapp-phone-chat.png`: phone-frame direction showing a recognizable light-mode WhatsApp group chat and the own-account command and acknowledgment. Prompt: `whatsapp-phone-chat-prompt.md`.
 - `team-chat-own-account.png`: current light-theme direction. A manager reports a checkout bug; the command and automated acknowledgment both appear as outgoing messages from your own account. Prompt: `team-chat-own-account-prompt.md`.
 - `team-chat-light.png`: earlier concept, superseded by `team-chat-own-account.png`; its incoming bot acknowledgment does not represent the current own-account flow. Prompt: `team-chat-light-prompt.md`.
 - `linkedin-overview.png`: square overview explaining delegation from WhatsApp to T3 Code.
