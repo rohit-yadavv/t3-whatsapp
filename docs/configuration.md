@@ -4,11 +4,11 @@
 
 From your existing WhatsApp account, type `@bot` followed by a message in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Mention projects and thread titles in ordinary language; T3 handles discovery and the requested action.
 
-A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Conversational answers and project/thread actions come from your T3 agent and use its configured provider allowance or API billing. Authentication, conversation delivery, and mapping commands use ordinary code without separate AI calls.
+A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Direct answers, delivery intent, and project/thread actions come from your existing T3 agent and use its configured provider allowance or API billing. There is no separate AI classifier. Requested completion delivery adds a T3 turn to prepare the WhatsApp response. Authentication, conversation delivery, and mapping commands use ordinary code without separate AI calls.
 
 ## One conversation per chat
 
-The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation. This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Successful submissions produce no acknowledgement; WhatsApp receives the agent’s answer directly. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
+The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation. This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Simple questions receive a direct answer without a generic acknowledgement. Task requests receive a brief confirmation after their T3 handoff is verified, with detailed results left in T3 by default. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
 
 Replying to an older bot response continues its conversation if it is unsettled and makes it active in the same chat again. If that conversation is settled, the reply starts a fresh No project thread instead. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
 
@@ -39,11 +39,31 @@ An explicit hashtag takes precedence over the chat mapping for that message. Wit
 
 Initial mappings live in private `config.json` under `routes`. Mappings saved by chat commands live in `.data/bridge.sqlite` and override the file entry. Restart after changing the configuration file. The `projects` catalog is optional shorthand for hints; it does not limit the projects the agent can discover through T3.
 
-## Todos and results from other threads
+## Delegation and delivery
 
-Reply to an issue with `@bot #website add this to my todo thread`. The assistant finds the requested destination through T3 and follows that thread's established workflow. Saving an item does not ask the agent to implement it. There is no bridge todo parser or separate todo database.
+WhatsApp is a task inbox and remote control. The assistant uses T3 tools to resolve the requested project or thread and hand off substantive work, then returns a short confirmation without waiting for the entire task. The work request includes your instruction, relevant quoted context, requested deliverables, provider/model/skills, and project hint. The bridge verifies the destination thread and accepted run before sending a success confirmation. It does not send a generic “I’m on it” message.
 
-The bridge relays responses from its No project assistant conversation. If you request a completed result from work in another thread, the prompt tells the assistant to follow T3's orchestration instructions to wait for and relay that result. If you only request creation or forwarding, it should confirm that action accurately. The bridge does not independently subscribe to every thread the agent mentions or promise automatic future updates. Permission requests still need an answer in T3 Code.
+| Request | WhatsApp response |
+| --- | --- |
+| “Research improvements for Diskovalist” | A short handoff confirmation; the report stays in T3 |
+| “Research this and send the report here” | Handoff confirmation, then the requested result when ready |
+| “Tell me when that task finishes” | Confirmation, then a brief completion notification |
+| “How is the research going?” | A short status answer; no automatic subscription |
+| “What is the capital of India?” | A direct answer in this chat's existing conversation |
+
+Delivery intent is interpreted by the conversational agent, without command keywords or a second model. A default T3 handoff is saved for later status/follow-ups but is not monitored for WhatsApp completion messages. Explicit WhatsApp delivery is stored in SQLite with the exact destination and run, survives restart, and does not occupy the inbox thread while the task runs. New requests can continue using the inbox.
+
+When requested work finishes, the bridge sends its matched result back to the assistant as data for a WhatsApp-specific response. It does not forward the desktop report verbatim. The assistant is instructed to return only what was requested: a notification, findings, a report, or files. Completion remains tied to the original chat and request even if `@bot new` was used meanwhile. Different chats do not share the saved handoff context. Changed/unmatched work runs are held for review rather than sending another run's result.
+
+Reply to an issue with `@bot #website add this to my todo thread`. The assistant finds the destination through T3 and follows that thread's workflow. Recording an item does not authorize implementing it. There is no bridge todo parser or separate todo database.
+
+### Files and links
+
+Generated files are sent only when requested here. The assistant stages the requested files in a per-request output folder; the bridge captures and validates them before adding durable document messages to the outbox. Up to three files of 10 MiB each are supported. Staged files cannot use directory traversal or symlinks, and the captured bytes are checked before sending. Incoming attachments and voice messages remain unsupported.
+
+WhatsApp replies use plain public URLs instead of desktop Markdown links. A local path such as `/Users/.../report.md` is not a public link and is not sent as one. Creating HTML does not publish a website. If you request a public URL, an actual publishing destination is needed; the assistant must explain this if no real URL exists. Files can instead be attached when requested.
+
+The agent uses an internal structured response with either a direct reply or a confirmed handoff and delivery preference. Protocol JSON, reference IDs, and tool logs are not sent to WhatsApp. Invalid protocol replies are held for review, without automatically rerunning a task that may already have started. Permission requests still need an answer in T3 Code.
 
 **Responses are posted in the chat where you sent the command.** Everyone in that chat can see them. Use Message yourself when the task or result should stay private.
 
@@ -120,7 +140,7 @@ Ambiguous T3 submissions and WhatsApp sends are held for review rather than auto
 
 If an existing T3 thread advances to another run in the desktop app, the bot asks you to review there rather than sending an unrelated answer. Long results are split and capped; the full result remains in T3 Code. Shutdown stops further submissions and waits up to ten seconds for in-flight bridge operations and credential writes. Unfinished side effects require review on restart.
 
-`.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, active conversations, and replies in plaintext with no automatic retention cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
+`.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, active conversations, handoff targets, delivery preferences, requested work results, and replies in plaintext with no automatic retention cleanup yet. `.data/deliveries/` and `.data/outgoing-files/` contain requested generated files and immutable copies awaiting delivery, without automatic cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
 
 New files are restricted to your Mac user. The prototype uses Baileys's multi-file auth helper; a transactional auth store is future work. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
 
@@ -144,9 +164,9 @@ pnpm test
 pnpm build
 ```
 
-`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
+`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, delivery contracts, opt-in completion tracking, generated-file delivery, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
-Text tasks only. Attachments, voice transcription, remote permission approvals, private cross-chat result routing, and a macOS background service are not implemented. Project/thread discovery and work delegation depend on the T3 tools available to the chosen agent. There is no bridge configuration for worktrees or subscriptions to other threads. Mapping commands use no extra AI calls.
+Incoming commands are text only. Voice transcription, remote permission approvals, private cross-chat result routing, and a macOS background service are not implemented. Outgoing generated files are supported when requested. Discovery and handoff behavior depend on the T3 tools available to the chosen agent. Completion tracking currently uses the local T3 CLI and the exact accepted work run; it does not follow later desktop runs or linked-machine work. Mapping commands use no extra AI calls.
 
 ## Contributing and references
 

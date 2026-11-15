@@ -6,7 +6,7 @@
 
 **Your WhatsApp companion for T3 Code.**
 
-Send tasks and continue agent conversations in your projects and threads directly from existing chats and groups, using your own WhatsApp account.
+Delegate tasks to T3 Code from existing chats and groups, using your own WhatsApp account.
 
 ## Setup
 
@@ -40,16 +40,19 @@ Keep your computer awake, online, and T3 Code running.
 
 ## Usage
 
-Send commands in a chat, group, or **Message yourself**. Reply to an issue to include its text as context. The bot sends its answer directly, without an “I’m on it” acknowledgement.
+Send commands in a chat, group, or **Message yourself**. Reply to an issue to include its text as context. Tasks get a short confirmation after T3 accepts the handoff. Work and results stay in T3 unless you ask for them here. Simple questions get a direct answer.
 
 ```text
 @bot hi
-@bot #website explain this project
+@bot #website research improvements and create a report
 @bot #website add this to my Launch planning thread
-@bot what did you find?
+@bot research Diskovalist and send the report here
+@bot tell me when that task finishes
+@bot how is the research going?
 ```
 
 - Each new chat or group gets its own **No project** conversation. Later messages continue it, including after restart. If you settle that thread in T3, the next message starts a fresh No project conversation.
+- Ask for “the report here”, “attach it”, or “let me know when it finishes” to opt into WhatsApp delivery. Requested files are attached; local file paths are never presented as public links.
 - Mention projects and thread titles naturally; the agent uses T3 tools to find them and perform your request.
 - `#project` and chat mappings add project context to the prompt. The conversation stays in No project.
 - Reply to an older bot message to continue its conversation, or send exactly `@bot new` to reset this chat.
