@@ -1,10 +1,5 @@
 import { DisconnectReason } from '@whiskeysockets/baileys';
 
-export type WebVersion = [number, number, number];
-export function chooseVersion(live: {version: WebVersion; isLatest: boolean}, fallback: WebVersion): WebVersion {
-  return live.isLatest ? live.version : fallback;
-}
-
 export function streamErrorReason(error: unknown): string | undefined {
   if (!(error && typeof error === 'object' && 'message' in error)) return;
   const message = error.message;

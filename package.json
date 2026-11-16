@@ -19,6 +19,7 @@
     "setup": "node --import tsx src/setup-cli.ts",
     "doctor": "node --import tsx src/setup-cli.ts doctor",
     "config:show": "node --import tsx src/setup-cli.ts config show",
+    "autostart": "node --import tsx src/setup-cli.ts autostart",
     "history": "node --import tsx src/history-cli.ts"
   },
   "dependencies": {

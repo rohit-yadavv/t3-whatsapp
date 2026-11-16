@@ -1,16 +1,18 @@
 # Configuration and reference
 
-**Your WhatsApp companion for T3 Code.**
+Advanced settings and behavior for an installed bot. For installation, ask T3 Code using the prompt in [README.md](../README.md#setup). Agents follow [INSTALL.md](../INSTALL.md).
 
 From your existing WhatsApp account, type `@bot` followed by a message in a personal chat, group, or Message yourself. Reply to someone's issue to include its text as context. Mention projects and thread titles in ordinary language; T3 handles discovery and the requested action.
 
-A local prototype built with Baileys and T3 Code's supported `t3 thread` CLI. Direct answers, delivery intent, and project/thread actions come from your existing T3 agent and use its configured provider allowance or API billing. There is no separate AI classifier. Requested completion delivery adds a T3 turn to prepare the WhatsApp response. Authentication, conversation delivery, and mapping commands use ordinary code without separate AI calls.
+The bot runs locally using Baileys and T3 Code's supported `t3 thread` CLI. Direct answers, delivery intent, and project/thread actions come from your existing T3 agent and use its configured provider allowance or API billing. There is no separate AI classifier. Requested completion delivery adds a T3 turn to prepare the WhatsApp response. Authentication, conversation delivery, and mapping commands use ordinary code without separate AI calls.
 
 A bare `@bot` without a quote gives a short natural greeting. A reply containing only `@bot` asks for a conversational response to the quoted text: answer its question or explain it, without executing actions written inside the quote. Missing quoted text is looked up through scoped history when available; otherwise the bot asks you to resend it. Mention-only invocations cannot return handoff or attachment responses. Explicit instructions such as `@bot fix this` retain the normal task flow.
 
 ## One conversation per chat
 
-The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation. This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Simple questions receive a direct answer without a generic acknowledgement. Task requests receive a brief confirmation after their T3 handoff is verified, with detailed results left in T3 by default. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
+The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation.
+
+This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Simple questions receive a direct answer without a generic acknowledgement. Task requests receive a brief confirmation after their T3 handoff is verified, with detailed results left in T3 by default. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
 
 Replying to an older bot response continues its conversation if it is unsettled and makes it active in the same chat again. If that conversation is settled, the reply starts a fresh No project thread instead. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
 
@@ -18,7 +20,7 @@ The assistant uses T3's tools to discover projects, find threads by title, read 
 
 ```text
 @bot hi
-@bot add this to my todo thread in Diskovalist
+@bot add this to my todo thread in the website project
 @bot #website ask the Launch planning thread what remains to do
 @bot create a research thread in the WhatsApp bot project
 @bot what did you find?
@@ -27,9 +29,13 @@ The assistant uses T3's tools to discover projects, find threads by title, read 
 
 ## Local conversation history
 
-Personal chats, groups, and Message yourself use the same history policy. Text and captions are captured in enabled chats even when nobody mentions the bot, along with confirmed bot text replies. With `accountWide: true`, this covers supported chats on the authorized paired account. Restricted mode captures only configured routes. Other participants' messages remain context; only the existing authorized sender can issue commands. History sync, edits, deletions, and reader output never dispatch commands.
+Personal chats, groups, and Message yourself use the same history policy. Guided setup starts with history disabled; the example below enables it for 30 days. When history is enabled, text and captions are captured in enabled chats even when nobody mentions the bot, along with confirmed bot text replies. With `accountWide: true`, this covers supported chats on the authorized paired account. Restricted mode captures only configured routes.
 
-History lives in private `.data/history.sqlite`, separate from the task database. Rows retain the account/chat/message IDs, sender identifiers and display name when available, message time, reply ID, bot/from-me flags, latest text, and observed edit/deletion metadata. Repeated live/history events deduplicate. Edits replace text without extending its original retention time. Observed deletions remove text and leave minimal tombstones until expiry, preventing stale sync from restoring it. Clearing a chat also suppresses older sync messages. Updates that arrive before an original message are held until it is observed; no missing text is invented.
+Other participants' messages remain context; only the existing authorized sender can issue commands. History sync, edits, deletions, and reader output never dispatch commands.
+
+History lives in private `.data/history.sqlite`, separate from the task database. Rows retain the account/chat/message IDs, sender identifiers and display name when available, message time, reply ID, bot/from-me flags, latest text, and observed edit/deletion metadata. Repeated live/history events deduplicate. Edits replace text without extending its original retention time. Observed deletions remove text and leave minimal tombstones until expiry, preventing stale sync from restoring it.
+
+Clearing a chat also suppresses older sync messages. Updates that arrive before an original message are held until it is observed; no missing text is invented.
 
 Configure this account's policy in its private `config.json`:
 
@@ -43,7 +49,9 @@ Configure this account's policy in its private `config.json`:
 }
 ```
 
-Each account/configuration can choose its own retention. Only one paired account is active in a bridge; there is no multi-user service. Restart after changing the settings. Shorter retention prunes older records immediately on startup; pruning also runs about every 15 minutes in the existing bridge timer. Reads enforce expiry even before the next physical prune. Increasing retention collects a longer window going forward and does not restore pruned records. `retentionDays: 0` disables history capture/retrieval and prunes that account's stored history and scopes on startup. Account control metadata is retained to enforce pruning; previously paired accounts' text is isolated and expires under their saved settings.
+Each account/configuration can choose its own retention. Only one paired account is active in a bridge; there is no multi-user service. Restart after changing the settings. Shorter retention prunes older records immediately on startup; pruning also runs about every 15 minutes in the existing bridge timer. Reads enforce expiry even before the next physical prune. Increasing retention collects a longer window going forward and does not restore pruned records.
+
+`retentionDays: 0` disables history capture/retrieval and prunes that account's stored history and scopes on startup. Account control metadata is retained to enforce pruning; previously paired accounts' text is isolated and expires under their saved settings.
 
 These settings govern the local history database. Existing accepted-task audit data, generated files, backups, and T3/provider conversations have separate lifetimes; changing history retention does not erase them or delete anything on the phone. The reader is a scoped application interface, not an OS sandbox against programs already running as your Mac user. Keep the data directory private.
 
@@ -67,7 +75,9 @@ Each accepted agent task includes `historyContext` with the paired account, orig
 
 For manual use, `pnpm run history --database .data/history.sqlite --scope <token-from-task> recent` invokes the same reader. The scoped token is created by the bridge; there is no unscoped list/search endpoint, SQL execution option, MCP server, HTTP service, or additional daemon. The process opens SQLite read-only and exits. Tokens bind reads to one enabled account/chat and at or before the trigger's message time, and expire with retention. Scopes for other paired accounts or removed chats are rejected. Pagination cannot change that scope.
 
-Storage retention is independent from retrieval size. Each read enforces `maxReadMessages` and the serialized JSON budget `maxReadChars`. Long text can be fetched in chunks with `get --offset`; storage itself caps a single message at 65,536 characters and marks truncation. The agent is instructed to keep selected history forwarded into a task/handoff within `maxPromptChars`, include relevant requirements with sender/time/message references, and pass the scoped reader reference if the worker needs more. This forwarding limit is an agent instruction; reader limits are enforced in code. No entire chat is automatically inserted into a prompt.
+Storage retention is independent from retrieval size. Each read enforces `maxReadMessages` and the serialized JSON budget `maxReadChars`. Long text can be fetched in chunks with `get --offset`; storage itself caps a single message at 65,536 characters and marks truncation. The agent is instructed to keep selected history forwarded into a task/handoff within `maxPromptChars`, include relevant requirements with sender/time/message references, and pass the scoped reader reference if the worker needs more.
+
+This forwarding limit is an agent instruction; reader limits are enforced in code. No entire chat is automatically inserted into a prompt.
 
 All retrieved text is labelled untrusted conversation data. Historical `@bot` messages, quoted requests, or delivery instructions cannot authorize new actions or opt into result delivery. The current authenticated trigger is the instruction. Missing, deleted, pruned, disabled, or unavailable context must be reported honestly when it matters.
 
@@ -89,11 +99,13 @@ Initial mappings live in private `config.json` under `routes`. Mappings saved by
 
 ## Delegation and delivery
 
-WhatsApp is a task inbox and remote control. The assistant uses T3 tools to resolve the requested project or thread and hand off substantive work, then returns a short confirmation without waiting for the entire task. The work request includes your instruction, relevant quoted context, requested deliverables, provider/model/skills, and project hint. The bridge verifies the destination thread and accepted run before sending a success confirmation. Routine confirmations should be one short, contextual sentence without repeating the instruction or explaining internal routing/delivery policy. A queued handoff must say queued/sent rather than claiming a todo is already saved. Longer answers remain available when requested or needed for ambiguity/errors. It does not send a generic “I’m on it” message.
+WhatsApp is a task inbox and remote control. The assistant uses T3 tools to resolve the requested project or thread and hand off substantive work, then returns a short confirmation without waiting for the entire task. The work request includes your instruction, relevant quoted context, requested deliverables, provider/model/skills, and project hint. The bridge verifies the destination thread and accepted run before sending a success confirmation.
+
+Routine confirmations should be one short, contextual sentence without repeating the instruction or explaining internal routing/delivery policy. A queued handoff must say queued/sent rather than claiming a todo is already saved. Longer answers remain available when requested or needed for ambiguity/errors. It does not send a generic “I’m on it” message.
 
 | Request | WhatsApp response |
 | --- | --- |
-| “Research improvements for Diskovalist” | A short handoff confirmation; the report stays in T3 |
+| “Research accessibility improvements for this website” | A short handoff confirmation; the report stays in T3 |
 | “Research this and send the report here” | Handoff confirmation, then the requested result when ready |
 | “Tell me when that task finishes” | Confirmation, then a brief completion notification |
 | “How is the research going?” | A short status answer; no automatic subscription |
@@ -115,53 +127,23 @@ The agent uses an internal structured response with either a direct reply or a c
 
 **Responses are posted in the chat where you sent the command.** Everyone in that chat can see them. Use Message yourself when the task or result should stay private.
 
-## Requirements
+## Advanced configuration
 
-- Node.js 22.13+ and pnpm 12.21.0.
-- T3 Code running locally with `t3 thread` support and your target projects registered.
-- A paired WhatsApp account. In account-wide mode, only messages from your own authenticated account can issue commands. Other participants cannot trigger work by typing `@bot`.
-
-Baileys uses WhatsApp's linked-device protocol without official Meta support. Account restrictions and protocol changes are possible. A dedicated number limits exposure, although using your existing account is supported.
-
-## Setup
-
-Use `pnpm setup` for the guided local browser flow, including automatic owner authorization and explicit access/history preferences. See [SETUP.md](../SETUP.md) for the full flow and agent-assisted setup. The commands below describe the manual alternative.
-
-```sh
-pnpm install --frozen-lockfile
-pnpm pair
-```
-
-Pairing mode opens a full-size black-on-white QR image in Preview on macOS. Scan that image from WhatsApp → Linked devices, rather than the small terminal blocks. The image is also saved at `.data/pairing-qr.png` and refreshed when WhatsApp issues a new QR. Keep pairing running and use the newest image. It is removed after pairing or normal shutdown.
-
-The QR grants account access: keep it private. Pairing mode never starts T3 tasks or sends saved replies. It prints the paired account identifiers and joined group IDs locally. For separate-account setup, messages sent by your personal account in a group also print its sender identifiers.
-
-Press Ctrl+C, then create your private configuration:
-
-```sh
-cp config.example.json config.json
-```
-
-Edit these fields:
+The setup page manages connection, account authorization, chat access, and history preferences. Most users do not need to edit JSON. For settings outside the page, edit the installation's private `config.json`:
 
 - `t3Binary`: `t3` if it is on your PATH, or an absolute path such as `/Users/your-name/.t3/bin/t3`.
 - `selfCommands`: `true` for typed `@bot` commands from the paired account.
 - `accountWide`: `true` to accept your own commands in personal chats, groups, and Message yourself. This requires `selfCommands: true`. Status broadcasts and channels are excluded.
-- `allowedSenderJids`: the paired account identifiers printed during pairing. Remove all example values. At least one must match the connected account.
+- `allowedSenderJids`: authorized sender identifiers, populated automatically by guided setup for the paired account. At least one must match the connected account in own-account mode.
 - `projects`: optional shorthand aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. Hashtags add these targets to the prompt; T3 can discover other projects by name.
 - `noProject`: the registered T3 No project workspace path or ID used for every assistant conversation. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The legacy `rememberContext` field is accepted for compatibility but ignored; per-chat continuity is always enabled.
 - `routes`: optional initial chat mappings, for example `{"chatJid":"CHAT_ID","project":"PROJECT_PATH_OR_ID"}`. Account-wide mode does not require any routes. Saved `use ... for this chat` commands override configured mappings.
-- `history`: optional per-account history policy described above; defaults to 30 days with bounded reads and best-effort recent import.
-- `dataDir`: session and database directory, relative to the config file. Default `.data` matches pairing mode when run from this folder. For another pairing directory use `T3_WHATSAPP_DATA_DIR=/absolute/path pnpm pair`.
+- `history`: per-account history policy described above. Guided setup defaults to disabled (`retentionDays: 0`); configurations that omit `history` use 30-day retention with bounded reads and best-effort recent import.
+- `dataDir`: session and database directory, relative to the config file; defaults to `.data`. Preserve the existing directory to retain authorization and pending work.
 
 Keep config and session data private. They are gitignored. New assistant threads inherit the No project workspace's default model and permissions in T3 Code. T3 handles the settings for any project work the assistant starts.
 
-```sh
-pnpm run doctor
-pnpm dev
-```
-
-Use `pnpm run doctor`: plain `pnpm doctor` runs pnpm's own diagnostics. The project check validates every catalog target without starting tasks. Set `T3_WHATSAPP_CONFIG=/absolute/path/config.json` to use another configuration file. Restart the bridge after editing config.
+Pause the bot before changing configuration from the CLI, then restart it after editing. Use `T3_WHATSAPP_CONFIG=/absolute/path/config.json` to select a different configuration file. Follow [startup and recovery instructions](#startup-and-recovery) to resume the owned runtime.
 
 ## First task
 
@@ -175,7 +157,7 @@ Or reply to an issue message with `@bot #website resolve this`. Bot messages beg
 
 Only new commands sent after the bridge starts are accepted. Commands received after a temporary disconnection may be recovered within the configured age window while the same process is alive. Accepted conversation messages and replies are durable. Outgoing bot IDs are recorded before sending and rejected as commands, including after restart, to prevent reply loops.
 
-Keep the Mac awake, online, and T3 Code running. This version runs in the foreground. If T3 asks a question or needs permission, answer in T3 Code; typing “yes” in WhatsApp never approves a permission prompt.
+Keep the computer awake, online, and T3 Code running. See [startup and recovery](#startup-and-recovery) for macOS automatic startup and foreground operation on other platforms. If T3 asks a question or needs permission, answer in T3 Code; typing “yes” in WhatsApp never approves a permission prompt.
 
 ## Restricted or separate-account mode
 
@@ -183,9 +165,45 @@ Set `accountWide: false` to restrict the bridge to chats listed in `routes`. Wit
 
 Old configs containing `routes[].groupJid` are read as `chatJid` mappings. If `projects` is absent, simple aliases are derived from route project folder names. New configurations can define hint aliases explicitly or leave the catalog empty.
 
+## Startup and recovery
+
+### Startup
+
+- **macOS 12+:** setup enables a per-user launchd job by default. No administrator password is needed. It checks for T3 about once a minute and starts the bot when available.
+- After five minutes of continuous T3 backend unavailability, the bot stops; automatic startup restarts it when T3 returns. Closing the T3 window may leave the backend running.
+- **Linux/Windows, or startup disabled:** T3 Code launches the foreground test from setup and keeps its terminal open.
+- Pause before re-pairing, editing config from the CLI, or starting a foreground test. Pause persists across login and restarts.
+
+Agent administration, from the installation folder:
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm autostart status --json` | Inspect support, enabled state, and runtime status |
+| `pnpm autostart enable --json` | Build and enable this installation's background job |
+| `pnpm autostart disable --json` | Persist Pause and remove the owned job; retain session/data |
+
+Keep the installation, dependencies, and Node executable in place. After moving them, pause and enable again to refresh paths. If macOS blocks startup, check **System Settings → General → Login Items & Extensions → Allow in the Background**. Changing `T3CODE_HOME` also requires pausing and enabling again.
+
+### Configuration and connection errors
+
+- `T3_WHATSAPP_CONFIG` selects a config file (default `config.json`). For a new config, `T3_WHATSAPP_DATA_DIR` selects its data folder; an existing config always determines its own data folder.
+- Doctor and config inspection do not establish a live WhatsApp connection. Verify in the setup page and confirm a reply on the phone.
+- If T3 is unavailable, ask the user to open it and check **Connection details & troubleshooting**. Setup detects `~/.t3/bin/t3` or `t3` on PATH.
+- If the WhatsApp session has expired, link through the page. Do not re-pair automatically for transient errors.
+- Restart setup after editing config externally. Account-owner or No project workspace mismatches require deliberate review.
+- Local diagnostics: `.data/connection.ndjson` and `.data/autostart/error.log`. Never share raw logs or credentials publicly.
+
+### Locks
+
+- Only one bot may use a data directory. Never stop an unrelated process or delete session data to clear a conflict.
+- `setup.lock` recovers automatically only when its owner has definitely exited; live or unverifiable owners remain locked.
+- For stale `run.lock` or `.data/autostart/control.lock`, verify the recorded PID has exited before removing only that lock.
+- If stale setup recovery leaves `setup.lock.recovery`, verify no setup process is running before removing the empty recovery directory.
+- Ambiguous task submissions and sends remain held for review; do not replay them.
+
 ## Recovery and privacy
 
-Only one bridge instance may use a data directory. Stop `pnpm pair` before starting `pnpm dev`. Normal shutdown releases `.data/run.lock`. If the process crashed, confirm the PID in that file has stopped before removing the lock.
+Only one bridge instance may use a data directory. For runtime locks, pairing, and startup failures, follow [startup and recovery](#startup-and-recovery). Never delete session data or start a competing instance to resolve a connection problem.
 
 Ambiguous T3 submissions and WhatsApp sends are held for review rather than automatically repeated, because the external operation may already have succeeded. Changing hint aliases or mappings does not move or discard a conversation. Removing a chat from restricted-mode routes blocks its persisted work and replies. Changing the No project workspace holds work tied to the previous workspace for review.
 
@@ -193,7 +211,7 @@ If an existing T3 thread advances to another run in the desktop app, the bot ask
 
 `.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, active conversations, handoff targets, delivery preferences, requested work results, and replies in plaintext with no automatic retention cleanup yet. `.data/deliveries/` and `.data/outgoing-files/` contain requested generated files and immutable copies awaiting delivery, without automatic cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
 
-New files are restricted to your Mac user. The prototype uses Baileys's multi-file auth helper; a transactional auth store is future work. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
+Runtime files are created with private permissions where supported by the operating system. The bot uses Baileys's multi-file auth helper. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
 
 ### Upgrading from native project/thread selection
 
@@ -201,9 +219,9 @@ Older bot conversations remain in T3 history, but new commands start a fresh No 
 
 ### Linking or connection problems
 
-If the camera cannot recognize the terminal QR, use the full-size image. While pairing runs, open it with `open .data/pairing-qr.png` from another terminal if necessary.
+Use the live QR in the setup page for account linking; see [INSTALL.md](../INSTALL.md) for the flow. A saved session alone does not establish a live connection.
 
-The bridge fetches WhatsApp Web's current protocol version at startup, retains it across reconnects, and falls back to the bundled version if lookup fails. The normal post-pairing restart (515) waits for credentials to be saved. Known `Stream Errored (ack)` failures with code 500 receive bounded retries; a healthy connection lasting at least one minute resets that budget. Unknown bad-session errors, logout, and restriction codes stop without deleting credentials.
+The bridge uses the protocol version bundled with its pinned Baileys release and retains it across reconnects. Automatically selecting the newest WhatsApp Web version can authenticate successfully while failing to deliver incoming messages. The normal post-pairing restart (515) waits for credentials to be saved. Known `Stream Errored (ack)` failures with code 500 receive bounded retries; a healthy connection lasting at least one minute resets that budget. Unknown bad-session errors, logout, and restriction codes stop without deleting credentials.
 
 See `.data/connection.ndjson` for diagnostics. Do not share QR images or auth files.
 
@@ -217,15 +235,15 @@ pnpm build
 
 `pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, delivery contracts, opt-in completion tracking, generated-file delivery, scoped history, retention and read budgets, edit/delete handling, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
-Incoming commands are text only. Voice transcription, remote permission approvals, private cross-chat result routing, and a macOS background service are not implemented. Outgoing generated files are supported when requested. Discovery and handoff behavior depend on the T3 tools available to the chosen agent. Completion tracking currently uses the local T3 CLI and the exact accepted work run; it does not follow later desktop runs or linked-machine work. Mapping commands use no extra AI calls.
+Incoming commands are text only. Voice transcription, remote permission approvals, and private cross-chat result routing are not implemented. Outgoing generated files are supported when requested. Discovery and handoff behavior depend on the T3 tools available to the chosen agent. Completion tracking currently uses the local T3 CLI and the exact accepted work run; it does not follow later desktop runs or linked-machine work. Mapping commands use no extra AI calls.
 
 ## Contributing and references
 
 Follow [CONTRIBUTING.md](../CONTRIBUTING.md). Commits use `<type>: <short description>`.
 
-- [Baileys](https://github.com/WhiskeySockets/Baileys), pinned to `7.0.0-rc14`.
+- [Baileys](https://github.com/WhiskeySockets/Baileys); the installed version is pinned in `package.json` and `pnpm-lock.yaml`.
 - [Baileys history sync documentation](https://github.com/WhiskeySockets/baileys.wiki-site/blob/main/docs/socket/history-sync.md).
 - [T3 host scripting documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md).
 - Related work: [Toucan Router](https://github.com/salalaslam/toucan-router). Its documentation informed the integration comparison; this is a separate implementation. No Toucan code or credentials are bundled.
 
-Dependency policy: prefer stable releases and commit the lockfile. Baileys remains an explicit exception: the stable 6.7.24 line requires a transitive Git dependency blocked by pnpm's default policy, so the current release candidate is retained without disabling those checks.
+Dependency policy: prefer stable releases and commit the lockfile. Baileys currently uses an explicitly pinned release candidate.

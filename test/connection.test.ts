@@ -1,13 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseVersion, disconnectAction, streamErrorReason } from '../src/connection.js';
+import { disconnectAction, streamErrorReason } from '../src/connection.js';
 
-test('a successful live protocol lookup replaces the bundled version', () => {
-  assert.deepEqual(chooseVersion({version:[2,3000,1054665735],isLatest:true},[2,3000,1043857760]),[2,3000,1054665735]);
-});
-test('failed live lookup retains the bundled version', () => {
-  assert.deepEqual(chooseVersion({version:[0,0,0],isLatest:false},[2,3000,1043857760]),[2,3000,1043857760]);
-});
 test('pairing restart is retried, terminal account failures stop, network errors back off', () => {
   assert.equal(disconnectAction(515),'restart');
   for (const code of [401,403,411,440,500]) assert.equal(disconnectAction(code),'stop');

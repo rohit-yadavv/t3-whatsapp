@@ -64,6 +64,29 @@ test('rerunning setup preserves routes, aliases, authorization, history limits, 
   } finally {f.clean();}
 });
 
+test('separate-account settings preserve sender authorization without authorizing an own-account switch',()=>{
+  const f=fixture();
+  try {
+    f.pair('900@s.whatsapp.net','901@lid');
+    const original={selfCommands:false,allowedSenderJids:['100@s.whatsapp.net'],routes:[{chatJid:'300@g.us',project:'/project'}]};
+    writeFileSync(f.path,JSON.stringify(original));
+    const setup=new Setup(f.path);
+    const settings={...options,access:'existing' as const,retentionDays:7};
+    setup.validateSettings(settings);
+    setup.save(settings);
+    const config=loadConfig(f.path);
+    assert.equal(config.selfCommands,false);
+    assert.deepEqual(config.allowedSenderJids,original.allowedSenderJids);
+    assert.deepEqual(config.routes,original.routes);
+    assert.equal(config.history?.retentionDays,7);
+    const saved=readFileSync(f.path,'utf8');
+    for(const access of ['self','all'] as const) {
+      assert.throws(()=>setup.save({...settings,access}),/authorization/);
+      assert.equal(readFileSync(f.path,'utf8'),saved);
+    }
+  } finally {f.clean();}
+});
+
 test('setup refuses mismatched accounts, workspace changes, external edits, and active locks',()=>{
   const f=fixture();
   try {
@@ -104,6 +127,10 @@ test('local server protects pairing and configuration with token, host, origin, 
     assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy')!,/frame-ancestors 'none'/);
     assert.equal(page.headers.get('cache-control'),'no-store');
     const markup=await page.text();
+    assert.match(markup,/<img class="brand-logo" src="\/assets\/logo\.png"/);
+    const logo=await fetch(local.origin+'/assets/logo.png');
+    assert.equal(logo.headers.get('content-type'),'image/png');
+    assert.deepEqual(Buffer.from(await logo.arrayBuffer()),readFileSync(resolve('assets/logo.png')));
     assert.doesNotMatch(markup,new RegExp(local.token));assert.doesNotMatch(markup,/localStorage|sessionStorage/);
     assert.equal((await fetch(local.origin+'/api/state')).status,401);
     assert.equal((await fetch(local.origin+'/api/state',{headers:{...headers,Origin:'https://other.test'}})).status,403);
@@ -119,7 +146,7 @@ test('local server protects pairing and configuration with token, host, origin, 
     assert.equal((await fetch(local.origin+'/api/save',{method:'POST',headers,body:JSON.stringify({x:'a'.repeat(17000)})})).status,400);
     assert.equal((await fetch(local.origin+'/api/start',{method:'POST',headers,body:'{}'})).status,400);
     assert.equal(existsSync(f.path),false);
-    await assert.rejects(startSetupServer(new Setup(f.path)),/EEXIST/);
+    await assert.rejects(startSetupServer(new Setup(f.path)),/Setup is already running/);
     assert.equal(local.runtime.state,'idle');
   } finally {await local.close();assert.equal(existsSync(join(f.data,'setup.lock')),false);f.clean();}
 });
@@ -192,5 +219,69 @@ test('setup-owned runtime reports IPC events and stops only its child',async()=>
     writeFileSync(join(f.data,'run.lock'),'999');
     assert.throws(()=>runtime!.start(true),/locked/);
     assert.equal(readFileSync(join(f.data,'run.lock'),'utf8'),'999');
+  } finally {await runtime?.stop();f.clean();}
+});
+
+test('setup reports effective access and session readiness without exposing account identifiers',()=>{
+  const f=fixture();
+  try {
+    f.pair();const setup=new Setup(f.path);setup.save(options);
+    assert.deepEqual(setup.summary().session,{saved:true,authorized:true});
+    assert.equal(setup.summary().access,'self');
+    setup.save({...options,access:'all'});assert.equal(setup.summary().access,'all');
+    f.pair('900@s.whatsapp.net','901@lid');
+    assert.deepEqual(setup.summary().session,{saved:true,authorized:false});
+    assert.doesNotMatch(JSON.stringify(setup.summary()),/100@s|200@lid|900@s|901@lid|never expose/);
+  } finally {f.clean();}
+});
+
+test('setup identifies an external runtime conflict without adopting or stopping its owner',async()=>{
+  const f=fixture();const local=await startSetupServer(new Setup(f.path));
+  const headers={Authorization:'Bearer '+local.token};
+  try {
+    const before=await (await fetch(local.origin+'/api/state',{headers})).json() as {runtimeOwner:string};
+    assert.equal(before.runtimeOwner,'none');
+    writeFileSync(join(f.data,'run.lock'),'999');
+    const during=await (await fetch(local.origin+'/api/state',{headers})).json() as {runtimeOwner:string;runtimeLocked:boolean};
+    assert.equal(during.runtimeOwner,'external');assert.equal(during.runtimeLocked,true);
+    assert.equal(readFileSync(join(f.data,'run.lock'),'utf8'),'999');
+    await local.close();assert.equal(readFileSync(join(f.data,'run.lock'),'utf8'),'999');
+  } finally {await local.close();f.clean();}
+});
+
+test('web QR sessions are recognized from the saved account even when registered is false',()=>{
+  const f=fixture();
+  try {
+    f.pair();
+    const creds=join(f.data,'auth','creds.json');
+    const data=JSON.parse(readFileSync(creds,'utf8'));data.registered=false;
+    writeFileSync(creds,JSON.stringify(data));
+    assert.deepEqual(pairedAccount(f.data),['100@s.whatsapp.net','200@lid']);
+    const setup=new Setup(f.path);setup.save(options);
+    assert.deepEqual(setup.summary().session,{saved:true,authorized:true});
+    const ready=new Setup(f.path);assert.deepEqual(ready.summary().session,{saved:true,authorized:true});
+    // A flag or a secondary ID alone is not enough without a valid primary account.
+    writeFileSync(creds,JSON.stringify({registered:true,me:{lid:'200@lid'}}));
+    assert.deepEqual(pairedAccount(f.data),[]);
+    writeFileSync(creds,JSON.stringify({registered:false}));assert.deepEqual(pairedAccount(f.data),[]);
+  } finally {f.clean();}
+});
+
+test('successful session verification advances setup without requiring a new QR',async()=>{
+  const f=fixture();let runtime:SetupRuntime|undefined;
+  try {
+    f.pair();
+    const creds=join(f.data,'auth','creds.json'),data=JSON.parse(readFileSync(creds,'utf8'));data.registered=false;writeFileSync(creds,JSON.stringify(data));
+    const setup=new Setup(f.path);setup.save(options);
+    const script=join(f.dir,'verify.cjs');
+    writeFileSync(script,"process.send({event:'setup-paired'},()=>process.exit(0));");
+    let child:ReturnType<typeof fork>|undefined;
+    const launch=((_entry,args,settings)=>{child=fork(script,args,settings);return child;}) as typeof fork;
+    runtime=new SetupRuntime(setup,launch);runtime.start(true);
+    await new Promise<void>(resolveDone=>child!.once('close',()=>resolveDone()));
+    assert.equal(runtime.state,'paired');assert.equal(runtime.qr,undefined);
+    assert.deepEqual(setup.summary().session,{saved:true,authorized:true});
+    const {setupScreen}=await import('../src/setup-screen.js');
+    assert.equal(setupScreen({...setup.summary(),runtimeOwner:'none',runtime:runtime.snapshot(),automatic:{enabled:false,paused:false}},true,true),'finish');
   } finally {await runtime?.stop();f.clean();}
 });

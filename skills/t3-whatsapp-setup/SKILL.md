@@ -1,18 +1,43 @@
 ---
 name: t3-whatsapp-setup
-description: Set up or diagnose the T3 WhatsApp bridge from its repository checkout using its local setup page and structured diagnostics. Use for installation, WhatsApp linking, and initial configuration; not for administering WhatsApp accounts or changing T3 itself.
+description: Configure or diagnose an installed T3 WhatsApp bot, launch its local setup page, link WhatsApp, and verify replies. For first-time download and installation, start with INSTALL.md.
 ---
 
 # T3 WhatsApp setup
 
-Read [SETUP.md](../../SETUP.md) in this repository for supported commands, check codes, and recovery. Use the checkout's pnpm scripts; do not invent a globally installed `t3-whatsapp` command. This repository ships the skill for agents to read; setup does not install it into global agent settings.
+Use this procedure from an existing installation. If the bot is not installed, follow [INSTALL.md](../../INSTALL.md) first, then return here. Read this skill locally; do not register it globally.
 
-Start with `pnpm doctor --json` after installing dependencies with `pnpm install --frozen-lockfile` if needed. A nonzero diagnostic exit can still contain valid JSON. Use `pnpm config:show --json` to inspect setup preferences without reading credentials. Fix missing prerequisites within the user's authorized scope, then run `pnpm setup` in a persistent user-visible terminal.
+## 1. Check and launch
 
-The page and CLI use the same setup logic. Let the user scan the QR and explicitly choose chat access and history. New installs start with self-chat access and history disabled; existing access settings are preserved by default. An agent may operate the page when browser tools and authorization are available, but must not silently widen access or history collection. Do not start T3, create projects, install services, or change global settings as an implicit part of bot setup.
+Run from the installation folder. If dependencies are missing, install them with `pnpm install --frozen-lockfile` before continuing:
 
-Keep the full setup URL, QR, auth files, account identifiers, and raw conversation data out of agent replies. Explain where the local page opened without echoing its access token. Do not scrape pairing logs or request credentials in chat.
+```sh
+pnpm run doctor --json
+pnpm config:show --json
+pnpm run setup
+```
 
-Respect live locks and preserve configuration, mappings, conversations, and pending work. Never remove a session/data directory or retry ambiguous external work to make a diagnostic pass. Review owner mismatches and workspace changes explicitly. Stop only the setup process or child bridge you started, never an unrelated PID.
+- Doctor may exit nonzero with useful JSON. Missing configuration or pairing is expected on a fresh install; resolve it through the page. Read other failures using the operational reference. A saved session does not prove a live connection.
+- Launch `pnpm run setup` in a persistent user-visible terminal and keep it alive during configuration. It starts the UI server and attempts to open the browser.
+- On Windows or if opening fails, open the page using available tools or direct the user to the private URL in their terminal. Never copy its token into chat.
+- If a persistent terminal is unavailable, report the limitation and remaining step; do not claim setup is running.
 
-Finish by checking live connection in the page and asking the user to send `@bot hi` in an enabled chat. Report whether connection, command acceptance, and reply sending were actually observed. A saved session or passing read-only doctor report does not establish end-to-end success. Tell the user that stopping the setup terminal stops its child bridge, and point to `pnpm dev` for independent foreground operation.
+## 2. Guide the user in the page
+
+1. **Check T3:** the page detects the local installation. Ask the user to open T3 if needed; do not start T3 or create projects yourself.
+2. **Link WhatsApp:** let the user scan the QR from WhatsApp → Linked devices. Reuse a valid saved session.
+3. **Choose preferences:** new installs default to Message yourself only and history off. The user chooses access and history; never widen either silently. Explain that group replies are visible to members and enabled history can reach the configured AI provider.
+4. **Finish:** macOS 12+ defaults to **Start automatically with T3**. Preserve a saved Pause or opt-out. Other platforms use the page's foreground test.
+5. **Verify:** ask the user to send `@bot hi` in an enabled chat. Report live connection, command acceptance, and reply delivery only when observed; do not send the test on their behalf.
+
+## 3. Hand off
+
+- With automatic startup enabled, setup and its terminal can close. Otherwise, closing the test terminal stops the bot. Keep the computer awake and online.
+- For later settings changes, launch setup again. **Save and reconnect** applies a draft to the owned runtime; **Cancel** leaves it unchanged. Preserve a paused state unless explicitly enabled.
+
+## Preserve existing work
+
+- Keep setup URLs, QR codes, credentials, account identifiers, and conversation data out of replies and Git.
+- Preserve configuration, sessions, mappings, and pending work. Never delete data, log out, or retry ambiguous submissions/sends to make a check pass.
+- Pause before re-pairing or editing configuration from the CLI. Never stop an unrelated process; review account or workspace mismatches explicitly.
+- For startup, locks, or configuration errors, read [the operational reference](../../docs/configuration.md#startup-and-recovery).

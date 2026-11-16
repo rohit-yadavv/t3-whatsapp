@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync, rmSync, renameSync, chmodSync, closeSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import makeWASocket, { DEFAULT_CONNECTION_CONFIG, fetchLatestWaWebVersion, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from '@whiskeysockets/baileys';
+import makeWASocket, { DEFAULT_CONNECTION_CONFIG, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qr from 'qrcode-terminal';
 import { loadConfig, projectCatalog, isSupportedChat, type Config } from './config.js';
@@ -13,13 +13,18 @@ import {documentContent,type Document} from './responses.js';
 import {HistoryStore} from './history.js';
 import {HistoryRecorder,isMessageMutation,shouldImportHistory} from './history-recorder.js';
 import { Worker } from './worker.js';
-import { chooseVersion, disconnectAction, streamErrorReason } from './connection.js';
+import { disconnectAction, streamErrorReason } from './connection.js';
 import { pairingQrPng } from './pairing-qr.js';
+import { T3Availability, T3_SHUTDOWN_GRACE_MS } from './t3-availability.js';
+import { backgroundReporter } from './background-status.js';
+import { localT3Available } from './local-t3.js';
 
 process.umask(0o077);
 // Setup uses the existing runtime over private IPC, never terminal-log parsing.
 const setupManaged = Boolean(process.send);
+let background: ReturnType<typeof backgroundReporter> | undefined;
 function setupEvent(event: string, details: Record<string, unknown> = {}) {
+  try {background?.report(event,details);} catch { /* Status reporting must not alter delivery outcomes. */ }
   if (process.connected) process.send?.({event, ...details}, () => {});
 }
 const pairingOnly = process.argv[2] === 'pair';
@@ -63,6 +68,10 @@ if (process.argv[2] === 'doctor') {
     } catch {}
   });
   try { writeFileSync(fd, String(process.pid)); } finally { closeSync(fd); }
+  if (process.env.T3_WHATSAPP_AUTOSTART_DATA_DIR===config.dataDir && !pairingOnly) {
+    background=backgroundReporter(config.dataDir);
+    process.once('exit',()=>{try{background?.close();}catch{}});
+  }
   const startedAtSeconds = Math.floor(Date.now() / 1000);
   const store = new Store(join(config.dataDir, 'bridge.sqlite'), !pairingOnly);
   closeStore = () => store.close();
@@ -76,6 +85,7 @@ if (process.argv[2] === 'doctor') {
   let qrSequence = 0, qrOpened = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let t3Availability: T3Availability | undefined;
   let credentialsSaved: Promise<void> = Promise.resolve();
   const worker = new Worker(bridge, store, () => !pairingOnly && connected && !stopped, async (outgoing, quote) => {
     if (!socket) throw new Error('WhatsApp is disconnected.');
@@ -107,15 +117,10 @@ if (process.argv[2] === 'doctor') {
     console.log(`[WhatsApp] ${event}`, JSON.stringify(details));
     setupEvent(event, details);
   }
-  const bundledVersion = DEFAULT_CONNECTION_CONFIG.version;
-  let version = bundledVersion;
-  try {
-    const live = await fetchLatestWaWebVersion({signal:AbortSignal.timeout(12000)});
-    version = chooseVersion(live, bundledVersion);
-    diagnostic('protocol-version', {version:version.join('.'),source:live.isLatest ? 'WhatsApp Web' : 'bundled fallback'});
-  } catch {
-    diagnostic('protocol-version', {version:version.join('.'),source:'bundled fallback'});
-  }
+  // Keep the protocol paired with this Baileys release; newer Web versions can
+  // authenticate successfully while failing to deliver incoming messages.
+  const version = DEFAULT_CONNECTION_CONFIG.version;
+  diagnostic('protocol-version', {version:version.join('.'),source:'bundled'});
 
   function connect() {
     if (stopped) return;
@@ -131,6 +136,7 @@ if (process.argv[2] === 'doctor') {
     });
     current.ev.on('connection.update', update => {
       if (current !== socket || stopped) return;
+      if(update.receivedPendingNotifications) diagnostic('messages-ready');
       if (update.isNewLogin) {
         diagnostic('pairing-accepted');
         clearPairingQr();
@@ -210,6 +216,7 @@ if (process.argv[2] === 'doctor') {
     current.ev.on('chats.delete', chats=>{if(current===socket && !stopped)for(const jid of chats)history?.delete({jid,all:true});});
     current.ev.on('messages.upsert', event => {
       if (current !== socket || stopped) return;
+      diagnostic('message-batch',{count:event.messages.length,type:event.type,requested:Boolean(event.requestId)});
       if (pairingOnly) {
         for (const raw of event.messages) {
           const m=normalize(raw);
@@ -235,9 +242,23 @@ if (process.argv[2] === 'doctor') {
       if (acceptedAny) void worker.tick();
     });
   }
-  timer = setInterval(() => { history?.prune(); void worker.tick(); }, config.pollIntervalMs);
+  if (!pairingOnly) {
+    t3Availability=new T3Availability(
+      async () => {
+        const runtimeFile=process.env.T3_WHATSAPP_AUTOSTART_RUNTIME_FILE;
+        if(runtimeFile) {
+          if(!await localT3Available(runtimeFile)) throw new Error('T3 backend unavailable.');
+        } else await command(config.t3Binary,['thread','list','--project',config.noProject,'--json'],'',{timeoutMs:5000});
+      },
+      () => { void shutdown(); },
+      event => diagnostic(event,{graceMinutes:T3_SHUTDOWN_GRACE_MS/60000}),
+    );
+    void t3Availability.tick();
+  }
+  timer = setInterval(() => { history?.prune(); void t3Availability?.tick(); void worker.tick(); }, config.pollIntervalMs);
   async function shutdown(code = 0) {
     if (stopped) return;
+    t3Availability?.stop();
     stopped = true; clearPairingQr(); clearInterval(timer); clearTimeout(reconnectTimer);
     socket?.end(undefined);
     let saved = false;

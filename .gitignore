@@ -9,3 +9,6 @@ config.json.setup.tmp
 .env
 .env.*
 !.env.example
+
+# Generated output, previews, and exports
+/output/
