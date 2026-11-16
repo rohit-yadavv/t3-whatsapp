@@ -1,0 +1,71 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Validate stable release configuration
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, statSync } from 'node:fs';
+
+          const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
+          const { version } = readJson('package.json');
+          const config = readJson('release-please-config.json');
+          const manifest = readJson('.release-please-manifest.json');
+          const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          assert.match(version, stable, 'Package version must be stable');
+          assert.match(config['initial-version'], stable, 'Initial version must be stable');
+          assert.equal(config.prerelease, false);
+          assert.equal(config.draft, false);
+          assert.equal(config['include-component-in-tag'], false);
+          assert.equal(config['include-v-in-tag'], true);
+          if (manifest['.']) {
+            assert.equal(manifest['.'], version, 'Release manifest must match package version');
+          } else {
+            assert.equal(config['initial-version'], version, 'First release must match package version');
+          }
+          for (const path of [
+            'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc',
+            'INSTALL.md', 'skills/t3-whatsapp-setup/SKILL.md',
+          ]) {
+            assert.ok(statSync(path).isFile(), `Missing installation file: ${path}`);
+          }
+          NODE
+      - name: Create release PR or publish merged release
+        uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
