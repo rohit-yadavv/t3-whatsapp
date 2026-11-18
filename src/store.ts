@@ -22,6 +22,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS chat_context (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL, thread_id TEXT, task_id TEXT);
       CREATE TABLE IF NOT EXISTS chat_mappings (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sent_messages (id TEXT PRIMARY KEY, content TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS outbound_contacts (
+        account TEXT NOT NULL, jid TEXT NOT NULL, phone TEXT, name TEXT,
+        PRIMARY KEY (account, jid)
+      );
       CREATE INDEX IF NOT EXISTS tasks_state ON tasks(state);
       CREATE INDEX IF NOT EXISTS tasks_thread_project ON tasks(thread_id, group_jid, project);
       CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state);
@@ -32,8 +36,9 @@ export class Store {
   }
   requestForMessage(chat: string, id?: string): Task | undefined {
     if (!id) return;
-    const outgoing=this.db.prepare('SELECT task_id FROM outbox WHERE group_jid=? AND id=?').get(chat,id) as {task_id:string} | undefined;
-    return outgoing ? this.task(outgoing.task_id) : this.db.prepare('SELECT * FROM tasks WHERE group_jid=? AND message_id=?').get(chat,id) as unknown as Task | undefined;
+    const outgoing=this.db.prepare('SELECT task_id FROM outbox WHERE group_jid=? AND id=?').get(chat,id) as {task_id:string|null} | undefined;
+    if (outgoing) return outgoing.task_id ? this.task(outgoing.task_id) : undefined;
+    return this.db.prepare('SELECT * FROM tasks WHERE group_jid=? AND message_id=?').get(chat,id) as unknown as Task | undefined;
   }
   chatProject(chat: string): string | undefined {
     return (this.db.prepare('SELECT project FROM chat_mappings WHERE chat_jid=?').get(chat) as {project:string} | undefined)?.project;
@@ -59,7 +64,7 @@ export class Store {
     return this.db.prepare("SELECT payload FROM tasks WHERE group_jid=? AND json_type(payload,'$.handoff')='object' ORDER BY rowid DESC LIMIT 5").all(chat).map(row=>JSON.parse(row.payload as string,BufferJSON.reviver).handoff);
   }
   isOutgoing(group: string, id?: string): boolean {
-    return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE group_jid=? AND id=?').get(group, id));
+    return Boolean(id && this.db.prepare('SELECT 1 FROM outbox WHERE id=? AND (group_jid=? OR task_id IS NULL)').get(id, group));
   }
   add(id: string, m: Incoming, project: string, thread?: string, state = 'queued'): boolean {
     return this.db.prepare("INSERT OR IGNORE INTO tasks (id,group_jid,message_id,project,thread_id,state,payload) VALUES (?,?,?,?,?,?,?)")
@@ -81,6 +86,13 @@ export class Store {
     this.db.prepare("INSERT INTO outbox (id,group_jid,task_id,text,quote,state,document) VALUES (?,?,?,?,?,'pending',?)").run(id,task.group_jid,task.id,text,JSON.stringify(m.raw,BufferJSON.replacer),document ? JSON.stringify(document) : null);
   }
   pending(): Outgoing[] { return this.db.prepare("SELECT * FROM outbox WHERE state='pending' ORDER BY rowid").all() as unknown as Outgoing[]; }
+  beginDirectSend(id: string, chat: string) {
+    // Record before sending so an immediate echo cannot become an inbound command.
+    this.db.prepare("INSERT INTO outbox (id,group_jid,state) VALUES (?,?,'sending')").run(id,chat);
+  }
+  directSendState(id: string): string | undefined {
+    return (this.db.prepare('SELECT state FROM outbox WHERE id=? AND task_id IS NULL').get(id) as {state:string} | undefined)?.state;
+  }
   sentState(id: string, state: string) { this.db.prepare('UPDATE outbox SET state=? WHERE id=?').run(state, id); }
   remember(id: string, message: unknown) { this.db.prepare('INSERT OR REPLACE INTO sent_messages VALUES (?,?)').run(id, JSON.stringify(message, BufferJSON.replacer)); }
   message(id: string) { const r = this.db.prepare('SELECT content FROM sent_messages WHERE id=?').get(id) as {content:string} | undefined; return r ? JSON.parse(r.content, BufferJSON.reviver) : undefined; }

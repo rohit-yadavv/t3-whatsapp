@@ -6,7 +6,7 @@ import {parseResponse,prepareDocuments,whatsappText,type Handoff,type Completion
 import { BufferJSON } from '@whiskeysockets/baileys';
 import {isSupportedChat, projectCatalog, type Config} from './config.js';
 import {parseProjectCommand, type ProjectContext} from './projects.js';
-import { hasSelfPrefix, instructionText, taskPrompt, type Incoming } from './messages.js';
+import { hasSelfPrefix, instructionText, taskPrompt, withBotIcon, type Incoming } from './messages.js';
 import { Store, type Task } from './store.js';
 import type { T3 } from './t3.js';
 
@@ -101,8 +101,7 @@ export class Bridge {
     const capped = characters.slice(0, 12000);
     if (characters.length > 12000) capped.push(...Array.from('\n[More in T3 Code]'));
     for (let i = 0; i < capped.length; i += 3000) {
-      const prefix = this.config.selfCommands ? '🤖 ' : '';
-      this.store.outgoing('3EB0' + randomBytes(16).toString('hex').toUpperCase(), task, prefix + capped.slice(i, i + 3000).join(''));
+      this.store.outgoing('3EB0' + randomBytes(16).toString('hex').toUpperCase(), task, withBotIcon(capped.slice(i, i + 3000).join('')));
     }
   }
   async submitQueued(shouldContinue = () => true, afterSubmit: () => Promise<void> = async () => {}) {

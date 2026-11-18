@@ -3,6 +3,11 @@ import type {DeliveryContext} from './responses.js';
 import type {ProjectContext} from './projects.js';
 import { jidNormalizedUser, normalizeMessageContent, type proto, type WAMessage } from '@whiskeysockets/baileys';
 
+export const botIcon = '🤖';
+export function withBotIcon(text: string): string {
+  return text.startsWith(botIcon) ? text : `${botIcon} ${text}`;
+}
+
 export function textOf(message: proto.IMessage | null | undefined): string {
   const m = normalizeMessageContent(message);
   return m?.conversation ?? m?.extendedTextMessage?.text ?? m?.imageMessage?.caption ?? m?.videoMessage?.caption ?? m?.documentMessage?.caption ?? '';

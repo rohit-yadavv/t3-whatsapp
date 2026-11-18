@@ -1,6 +1,6 @@
 # Installation instructions for T3 Code
 
-Agent entry point for the setup prompt in [README.md](README.md#setup). Prepare the bot, then continue with its setup skill. Users do not need to clone the repository or install a global skill.
+Agent entry point for the setup prompt in [README.md](README.md#setup). Prepare the bot, then continue with its setup skill. The agent installs the user-level WhatsApp sending skill as part of setup.
 
 ## 1. Prepare the installation
 
@@ -22,4 +22,4 @@ Resolve installation failures before continuing; do not bypass the lockfile. Kee
 
 ## 3. Continue with setup
 
-Report the installation folder and release version, then follow the installed [setup skill](skills/t3-whatsapp-setup/SKILL.md). It owns diagnostics, launching the UI, configuration, and live verification. Do not stop at downloading files or giving the user commands.
+Report the installation folder and release version, then follow the installed [setup skill](skills/t3-whatsapp-setup/SKILL.md). It covers diagnostics, configuration, live verification, and [installing the sending skill](skills/t3-whatsapp-setup/SKILL.md#3-install-the-sending-skill). Do not stop at downloading files or giving the user commands.

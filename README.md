@@ -36,6 +36,8 @@ Each chat keeps its own conversation. Results stay in T3 unless you ask for them
 
 [Conversation behavior](docs/configuration.md#one-conversation-per-chat) · [Project defaults](docs/configuration.md#project-context-and-mappings) · [Optional chat history](docs/configuration.md#local-conversation-history)
 
+Use [`$t3-whatsapp`](docs/outbound.md) in T3 Code to preview and send WhatsApp messages.
+
 ## For bots and agents
 
 Follow [INSTALL.md](INSTALL.md) to install the bot and launch setup for the user.

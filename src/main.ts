@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync, rmSync, renameSync, chmodSync, closeSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import makeWASocket, { DEFAULT_CONNECTION_CONFIG, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from '@whiskeysockets/baileys';
+import makeWASocket, { DEFAULT_CONNECTION_CONFIG, jidNormalizedUser, useMultiFileAuthState, type Contact, type WAMessage } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qr from 'qrcode-terminal';
 import { loadConfig, projectCatalog, isSupportedChat, type Config } from './config.js';
-import { hasSelfPrefix, normalize, shouldHandleUpsert } from './messages.js';
+import { botIcon, hasSelfPrefix, normalize, shouldHandleUpsert, withBotIcon } from './messages.js';
 import { Store } from './store.js';
 import { T3Cli, command } from './t3.js';
 import { Bridge } from './bridge.js';
@@ -19,6 +19,7 @@ import { T3Availability, T3_SHUTDOWN_GRACE_MS } from './t3-availability.js';
 import { backgroundReporter } from './background-status.js';
 import { localT3Available } from './local-t3.js';
 import { recoverOfflineSync } from './offline-recovery.js';
+import { Outbound, startOutboundServer } from './outbound.js';
 
 process.umask(0o077);
 // Setup uses the existing runtime over private IPC, never terminal-log parsing.
@@ -58,10 +59,12 @@ if (process.argv[2] === 'doctor') {
   }
   let closeStore: (() => void) | undefined;
   let closeHistory: (() => void) | undefined;
+  const outboundFile = join(config.dataDir, 'outbound.json');
   // Register cleanup before any fallible startup I/O or network awaits.
   process.once('exit', () => {
     try { closeStore?.(); } catch {}
     try { closeHistory?.(); } catch {}
+    if (!pairingOnly) try { rmSync(outboundFile, {force:true}); } catch {}
     try {
       rmSync(join(config.dataDir, 'pairing-qr.png'), {force:true});
       rmSync(join(config.dataDir, 'pairing-qr.png.tmp'), {force:true});
@@ -89,9 +92,31 @@ if (process.argv[2] === 'doctor') {
   let timer: ReturnType<typeof setInterval> | undefined;
   let t3Availability: T3Availability | undefined;
   let credentialsSaved: Promise<void> = Promise.resolve();
+  const accountId = (current: NonNullable<typeof socket>) => jidNormalizedUser(current.user?.id ?? '');
+  const outbound = pairingOnly ? undefined : new Outbound(store, () => {
+    const current = socket;
+    const account = current && accountId(current);
+    if (!current || !account || !connected || stopped) return;
+    return {
+      account,
+      groups: async () => Object.values(await current.groupFetchAllParticipating())
+        .filter(group => isSupportedChat(group.id) && group.id.endsWith('@g.us'))
+        .map(group => ({ jid:group.id, name:group.subject, kind:'group' as const })),
+      phone: async number => (await current.onWhatsApp(number))?.find(entry => entry.exists)?.jid,
+      send: async (jid, text, id) => {
+        const result = await current.sendMessage(jid, {text}, {messageId:id});
+        if (!result) throw new Error('WhatsApp did not confirm the send.');
+        try { history?.capture(result); } catch (e) { error(e); }
+        return result.message ?? {};
+      },
+    };
+  });
+  const outboundServer = outbound && startOutboundServer(outboundFile, outbound, error);
   const worker = new Worker(bridge, store, () => !pairingOnly && connected && !stopped, async (outgoing, quote) => {
     if (!socket) throw new Error('WhatsApp is disconnected.');
-    const content=outgoing.document ? documentContent(JSON.parse(outgoing.document) as Document) : {text:outgoing.text};
+    const content = outgoing.document
+      ? {...documentContent(JSON.parse(outgoing.document) as Document), caption:botIcon}
+      : {text:withBotIcon(outgoing.text)};
     const result = await socket.sendMessage(outgoing.group_jid, content, {
       quoted:quote as WAMessage, messageId:outgoing.id,
     });
@@ -215,7 +240,24 @@ if (process.argv[2] === 'doctor') {
         });
       }
     });
-    current.ev.on('messaging-history.set', event=>{if(current===socket && !stopped && shouldImportHistory(Boolean(history?.enabled && history.options.importRecent),event.syncType))history?.import(event.messages);});
+    const saveContacts = (contacts: readonly Partial<Contact>[]) => {
+      if (!outbound || current !== socket || stopped) return;
+      const account = accountId(current);
+      if (!account) return;
+      for (const contact of contacts) {
+        const jid = jidNormalizedUser(contact.lid ?? contact.id ?? '');
+        const phone = jidNormalizedUser(contact.phoneNumber ?? contact.id ?? '');
+        outbound.contact(account, jid, phone.endsWith('@s.whatsapp.net') ? phone : undefined, contact.name);
+      }
+    };
+    current.ev.on('contacts.upsert', saveContacts);
+    current.ev.on('contacts.update', saveContacts);
+    current.ev.on('messaging-history.set', event => {
+      saveContacts(event.contacts);
+      if (current === socket && !stopped && shouldImportHistory(Boolean(history?.enabled && history.options.importRecent),event.syncType)) {
+        history?.import(event.messages);
+      }
+    });
     current.ev.on('messages.update', event=>{if(current===socket && !stopped)history?.update(event);});
     current.ev.on('messages.delete', event=>{if(current===socket && !stopped)history?.delete(event);});
     current.ev.on('chats.delete', chats=>{if(current===socket && !stopped)for(const jid of chats)history?.delete({jid,all:true});});
@@ -265,6 +307,7 @@ if (process.argv[2] === 'doctor') {
     if (stopped) return;
     t3Availability?.stop();
     stopped = true; clearPairingQr(); clearInterval(timer); clearTimeout(reconnectTimer);
+    outboundServer?.close();
     stopOfflineRecovery?.();
     socket?.end(undefined);
     let saved = false;

@@ -45,7 +45,7 @@ test('only the agent answer is sent and replies to it continue the same thread',
   assert.equal(store.pending().length,0,'submission should not produce an acknowledgement');
   t3.snapshot.thread.status='completed';t3.snapshot.messages=[{role:'assistant',runId:'r1',text:'Fixed and tested.'}];
   await bridge.collectResults();await bridge.collectResults();
-  assert.equal(store.pending().length,1);const reply=store.pending()[0];assert.equal(reply.text,'Fixed and tested.');
+  assert.equal(store.pending().length,1);const reply=store.pending()[0];assert.equal(reply.text,'🤖 Fixed and tested.');
   assert.equal(store.requestForMessage(group,reply.id)?.thread_id,'t1');
   assert.equal(bridge.accept(message('follow',{quoted:reply.id,mention:false,text:'Also fix desktop'}),[bot]),true);
   await bridge.submitQueued();assert.equal(t3.calls[1].thread,'t1');
@@ -185,7 +185,7 @@ test('long emoji responses retain complete Unicode characters across chunks', t 
   const {bridge,store}=setup(t);store.add('task',message(),'/project');
   const text='a'.repeat(2999)+'😀'+'b'.repeat(100);
   bridge.enqueue(store.task('task')!,text);
-  assert.equal(store.pending().map(m=>m.text).join(''),text);
+  assert.equal(store.pending().map(m=>m.text.replace(/^🤖 /u,'')).join(''),text);
 });
 
 test('restart supersedes all legacy selection prompts without replaying their requests',()=>{

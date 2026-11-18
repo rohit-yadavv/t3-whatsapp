@@ -20,7 +20,8 @@
     "doctor": "node --import tsx src/setup-cli.ts doctor",
     "config:show": "node --import tsx src/setup-cli.ts config show",
     "autostart": "node --import tsx src/setup-cli.ts autostart",
-    "history": "node --import tsx src/history-cli.ts"
+    "history": "node --import tsx src/history-cli.ts",
+    "whatsapp": "node --import tsx src/outbound-cli.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",
