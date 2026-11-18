@@ -223,6 +223,8 @@ Use the live QR in the setup page for account linking; see [INSTALL.md](../INSTA
 
 The bridge uses the protocol version bundled with its pinned Baileys release and retains it across reconnects. Automatically selecting the newest WhatsApp Web version can authenticate successfully while failing to deliver incoming messages. The normal post-pairing restart (515) waits for credentials to be saved. Known `Stream Errored (ack)` failures with code 500 receive bounded retries; a healthy connection lasting at least one minute resets that budget. Unknown bad-session errors, logout, and restriction codes stop without deleting credentials.
 
+If an offline-message preview arrives but sync stalls, the bridge requests another pending batch after five seconds without offline-node activity, up to 50 requests per connection. Recovery stops on the offline-complete marker, a failed request, disconnect, or shutdown. This drains the linked device's pending queue without changing chat access or retained-history settings; existing age and duplicate checks still apply to commands. Diagnostics record only counts and recovery events. A connected socket alone does not confirm that message sync has finished.
+
 See `.data/connection.ndjson` for diagnostics. Do not share QR images or auth files.
 
 ## Verification and current limits

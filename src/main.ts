@@ -18,6 +18,7 @@ import { pairingQrPng } from './pairing-qr.js';
 import { T3Availability, T3_SHUTDOWN_GRACE_MS } from './t3-availability.js';
 import { backgroundReporter } from './background-status.js';
 import { localT3Available } from './local-t3.js';
+import { recoverOfflineSync } from './offline-recovery.js';
 
 process.umask(0o077);
 // Setup uses the existing runtime over private IPC, never terminal-log parsing.
@@ -80,6 +81,7 @@ if (process.argv[2] === 'doctor') {
   const history=historyStore ? new HistoryRecorder(config,historyStore,join(config.dataDir,'history.sqlite'),(chat,id)=>store.isOutgoing(chat,id)) : undefined;
   const bridge = new Bridge(config, store, new T3Cli(config.t3Binary), error,history);
   let socket: ReturnType<typeof makeWASocket> | undefined;
+  let stopOfflineRecovery:(()=>void)|undefined;
   let connected = false, stopped = false, reconnects = 0, ackRetries = 0, openedAt = 0;
   const qrImage = join(config.dataDir, 'pairing-qr.png');
   let qrSequence = 0, qrOpened = false;
@@ -131,6 +133,8 @@ if (process.argv[2] === 'doctor') {
       getMessage: async key => key.id ? store.message(key.id) : undefined,
     });
     socket = current;
+    stopOfflineRecovery?.();
+    stopOfflineRecovery=recoverOfflineSync(current,diagnostic);
     current.ev.on('creds.update', () => {
       credentialsSaved = credentialsSaved.then(saveCreds).catch(e => { error(e); void shutdown(1); });
     });
@@ -190,6 +194,7 @@ if (process.argv[2] === 'doctor') {
         void worker.tick();
       }
       if (update.connection === 'close') {
+        stopOfflineRecovery?.();
         const wasConnected = connected;
         connected = false;
         const reason = (update.lastDisconnect?.error as {output?:{statusCode?:number}} | undefined)?.output?.statusCode;
@@ -260,6 +265,7 @@ if (process.argv[2] === 'doctor') {
     if (stopped) return;
     t3Availability?.stop();
     stopped = true; clearPairingQr(); clearInterval(timer); clearTimeout(reconnectTimer);
+    stopOfflineRecovery?.();
     socket?.end(undefined);
     let saved = false;
     void credentialsSaved.then(() => { saved = true; }, () => { saved = true; });
