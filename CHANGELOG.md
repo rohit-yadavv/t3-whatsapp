@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/rohit-yadavv/t3-whatsapp/compare/v0.1.0...v0.1.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* recover stalled WhatsApp offline message sync ([20a0862](https://github.com/rohit-yadavv/t3-whatsapp/commit/20a08625031e65595ad7c1789ca1f4048bd0ce50))
+
 ## 0.1.0 (2026-11-16)
 
 
