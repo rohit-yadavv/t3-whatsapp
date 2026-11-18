@@ -202,7 +202,7 @@ test('setup-owned runtime reports IPC events and stops only its child',async()=>
   let runtime:SetupRuntime|undefined;
   try {
     const script=join(f.dir,'runtime.cjs');
-    writeFileSync(script,`process.send({event:'connected'});process.send({event:'command-accepted'});process.send({event:'reply-sent'});setInterval(()=>{},1000);process.on('SIGTERM',()=>process.exit(0));`);
+    writeFileSync(script,`process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000);process.send({event:'connected'});process.send({event:'command-accepted'});process.send({event:'reply-sent'});`);
     f.pair();const setup=new Setup(f.path);setup.save(options);
     let spawned:ReturnType<typeof fork>|undefined;
     const launch=((_entry,args,settings)=>{spawned=fork(script,args,settings);return spawned;}) as typeof fork;
