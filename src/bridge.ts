@@ -8,7 +8,9 @@ import {isSupportedChat, projectCatalog, type Config} from './config.js';
 import {parseProjectCommand, type ProjectContext} from './projects.js';
 import { hasSelfPrefix, instructionText, taskPrompt, withBotIcon, type Incoming } from './messages.js';
 import { Store, type Task } from './store.js';
-import type { T3 } from './t3.js';
+import {ThreadUnavailableError,type T3} from './t3.js';
+
+const FRESH_HINT='send a new @bot message (not a reply) to start fresh';
 
 // Versioned payloads prevent old routing requests from being replayed under new semantics.
 type TaskMessage = Incoming & {bridgeVersion:2; projectContext?:ProjectContext; continueTaskId?:string;responseContract?:1;handoff?:Handoff;completion?:Completion;historyContext?:HistoryReference;mentionOnly?:'quoted'|'greeting'};
@@ -67,15 +69,12 @@ export class Bridge {
     if (command.kind==='map') {
       const project=this.projects.get(command.alias);
       if (!project) return this.record(m,'control','Unknown configured alias. Use @bot projects to list project hints, or name the project in your message.');
-      return this.record(m,'control',`This chat now provides #${command.alias} as default project context. Its No project conversation stays the same.`,()=>this.store.mapChat(m.group,project));
+      return this.record(m,'control',`This chat now provides #${command.alias} as default project context.`,()=>this.store.mapChat(m.group,project));
     }
-    if (command.kind==='unmap') return this.record(m,'control','Chat project hint cleared. Its conversation stays the same.',()=>this.store.unmapChat(m.group));
-    if (/^new$/i.test(command.instruction)) return this.record(m,'control','Conversation reset. Your next @bot message starts a fresh No project thread. The chat mapping is unchanged.',()=>this.store.clearContext(m.group));
+    if (command.kind==='unmap') return this.record(m,'control','Chat project hint cleared.',()=>this.store.unmapChat(m.group));
 
-    const context=this.store.context(m.group);
-    const active=context?.task_id ? this.store.task(context.task_id) : undefined;
-    const candidate=reference ?? (this.conversationTask(active) ? active : undefined);
-    const parent=candidate && this.isRouted(candidate) ? candidate : undefined;
+    // Only a reply to a bot message continues its conversation; every other @bot message starts fresh.
+    const parent=reference && this.isRouted(reference) ? reference : undefined;
     const mapping=this.mappedProject(m.group);
     const projectContext:ProjectContext | undefined=command.projects.length
       ? {source:'message',projects:command.projects}
@@ -85,7 +84,6 @@ export class Bridge {
     this.store.atomic(()=>{
       const id=randomUUID();
       accepted=this.store.add(id,payload,this.config.noProject,parent?.thread_id ?? undefined);
-      if (accepted) this.store.focusChat(m.group,this.config.noProject,parent?.thread_id ?? undefined,id);
     });
     return accepted;
   }
@@ -116,7 +114,7 @@ export class Bridge {
       if (message.continueTaskId) {
         const parent=this.store.task(message.continueTaskId);
         if (!this.conversationTask(parent) || parent.group_jid!==task.group_jid || !['queued','submitting','running','completed','stopped','waiting_work','work_review'].includes(parent.state)) {
-          this.store.atomic(()=>{this.store.setState(task.id,'review');this.enqueue(task,'I could not safely resume the earlier conversation. Check T3 Code before retrying, or send @bot new to start fresh.');});
+          this.store.atomic(()=>{this.store.setState(task.id,'review');this.enqueue(task,`I could not safely resume that conversation. Check T3 Code, or ${FRESH_HINT}.`);});
           continue;
         }
         if (!parent.thread_id) continue;
@@ -134,12 +132,19 @@ export class Bridge {
             this.store.attachThread(task.id,null);
           }
         } catch (error) {
-          this.logError(error);
-          this.store.atomic(()=>{
-            this.store.setState(task.id,'review');
-            this.enqueue(task,'I could not verify whether the previous conversation is settled. No message was sent. Check T3 Code, or send @bot new to start fresh.');
-          });
-          continue;
+          // A deleted thread is known to be gone and nothing was sent yet, so start fresh like a settled one.
+          if (error instanceof ThreadUnavailableError) {
+            if (!shouldContinue()) break;
+            task.thread_id=null;
+            this.store.attachThread(task.id,null);
+          } else {
+            this.logError(error);
+            this.store.atomic(()=>{
+              this.store.setState(task.id,'review');
+              this.enqueue(task,`I could not verify whether that conversation is settled. No message was sent. Check T3 Code, or ${FRESH_HINT}.`);
+            });
+            continue;
+          }
         }
       }
       message.responseContract=1;
@@ -152,7 +157,6 @@ export class Bridge {
         task.thread_id = result.threadId;
         this.store.atomic(() => {
           this.store.submitted(task, result.threadId, result.runId);
-          this.store.bindContext(task,result.threadId);
         });
         busyThreads.add(result.threadId);
       } catch (error) {

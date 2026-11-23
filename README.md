@@ -28,13 +28,13 @@ Send `@bot` messages in an enabled chat, group, or **Message yourself**.
 | Get a file in WhatsApp | `@bot research accessibility best practices and send the report here` |
 | Get a completion update | `@bot tell me when that task finishes` |
 | Check progress | `@bot how is the research going?` |
-| Start fresh | `@bot new` |
+| Continue a conversation | Reply to the bot's message |
 
 Each chat keeps its own conversation. Results stay in T3 unless you ask for them in WhatsApp.
 
 > Only your account can issue commands. Replies are visible to everyone in the chat; use **Message yourself** for privacy. Answer permission requests in T3 Code.
 
-[Conversation behavior](docs/configuration.md#one-conversation-per-chat) · [Project defaults](docs/configuration.md#project-context-and-mappings) · [Optional chat history](docs/configuration.md#local-conversation-history)
+[Conversation behavior](docs/configuration.md#conversations-follow-replies) · [Project defaults](docs/configuration.md#project-context-and-mappings) · [Optional chat history](docs/configuration.md#local-conversation-history)
 
 Use [`$t3-whatsapp`](docs/outbound.md) in T3 Code to preview and send WhatsApp messages.
 

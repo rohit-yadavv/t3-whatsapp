@@ -24,7 +24,7 @@ const schema = z.object({
   dataDir:z.string().default('.data'),
   selfCommands:z.boolean().default(false),
   accountWide:z.boolean().default(false),
-  // Accepted for old configs; per-chat conversation continuity is now always enabled.
+  // Accepted for old configs and ignored; only replies to bot messages continue a conversation.
   rememberContext:z.boolean().optional(),
   history:historySchema.optional(),
   noProject:target.default('~/.t3/scratch'),

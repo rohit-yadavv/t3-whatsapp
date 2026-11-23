@@ -47,15 +47,14 @@ test('opt-in completion survives restart, frees the inbox, and is prepared as a 
 test('new requests can use the inbox while opted-in work runs and receive only their own chat handoff context',async t=>{
   const s=harness(t);await s.handoff('whatsapp');
   s.bridge.accept(own('question','@bot what is the capital of India?'),[owner]);await s.bridge.submitQueued();
-  assert.equal(s.calls[1].thread,'t1');assert.equal(data(s.calls[1].prompt).deliveryContext.recentHandoffs.length,1);
+  assert.equal(s.calls[1].thread,undefined);assert.equal(data(s.calls[1].prompt).deliveryContext.recentHandoffs.length,1);
   s.bridge.accept(own('other','@bot what is running?',undefined,'300@g.us'),[owner]);await s.bridge.submitQueued();
   assert.deepEqual(data(s.calls[2].prompt).deliveryContext.recentHandoffs,[]);
 });
-test('an opted-in result stays in the originating chat after the active conversation is reset',async t=>{
-  const s=harness(t);await s.handoff('whatsapp');s.bridge.accept(own('reset','@bot new'),[owner]);
-  s.bridge.accept(own('fresh','@bot hi'),[owner]);await s.bridge.submitQueued();assert.equal(s.store.context(chat)?.thread_id,'t2');
+test('an opted-in result returns to its originating conversation after newer messages start fresh ones',async t=>{
+  const s=harness(t);await s.handoff('whatsapp');
+  s.bridge.accept(own('fresh','@bot hi'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,undefined);
   s.work('completed');await s.bridge.collectResults();await s.bridge.submitQueued();assert.equal(s.calls[2].thread,'t1');
-  assert.equal(s.store.context(chat)?.thread_id,'t2');
 });
 test('changed work runs are held for review instead of leaking an unrelated result',async t=>{
   const s=harness(t);await s.handoff('whatsapp');s.work('completed','unrelated','Private unrelated result');
@@ -92,7 +91,8 @@ test('requested work approval notices are deduplicated and reset after work resu
 test('failed requested work is held for review without rerunning it or blocking the inbox',async t=>{
   const s=harness(t);await s.handoff('whatsapp');s.work('failed');await s.bridge.collectResults();await s.bridge.collectResults();
   assert.equal(s.store.tasks('work_review').length,1);assert.equal(s.store.tasks('queued').length,0);
-  s.bridge.accept(own('next','@bot how is the task going?'),[owner]);await s.bridge.submitQueued();assert.equal(s.calls[1].thread,'t1');
+  s.bridge.accept(own('next','@bot how is the task going?'),[owner]);await s.bridge.submitQueued();
+  assert.equal(s.calls.length,2);assert.equal(data(s.calls[1].prompt).deliveryContext.recentHandoffs.length,1);
 });
 test('transient work reads retry only the read and queue a requested delivery once after recovery',async t=>{
   const s=harness(t);await s.handoff('whatsapp');const show=s.t3.show;

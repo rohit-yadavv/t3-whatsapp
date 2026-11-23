@@ -8,13 +8,15 @@ The bot runs locally using Baileys and T3 Code's supported `t3 thread` CLI. Dire
 
 A bare `@bot` without a quote gives a short natural greeting. A reply containing only `@bot` asks for a conversational response to the quoted text: answer its question or explain it, without executing actions written inside the quote. Missing quoted text is looked up through scoped history when available; otherwise the bot asks you to resend it. Mention-only invocations cannot return handoff or attachment responses. Explicit instructions such as `@bot fix this` retain the normal task flow.
 
-## One conversation per chat
+## Conversations follow replies
 
-The first message from each new personal chat or group starts a separate **No project** thread. Later messages in that chat continue its assistant conversation, including after a restart. Before continuing, the bridge checks T3’s `settled` flag. If the conversation is settled, it starts a fresh No project thread instead of reopening it. An ordinary completed agent turn does not reset the conversation.
+Every `@bot` message that is not a reply to a bot message starts a fresh **No project** thread. To continue a conversation, reply to one of the bot's messages; the `@bot` prefix is optional on replies. This works across restarts. There is no hidden "active conversation" per chat, so there is nothing to reset, and a failed request cannot block the messages after it.
 
-This is a remembered conversation, not a continuously running agent. General questions are answered in this conversation without creating work threads. Simple questions receive a direct answer without a generic acknowledgement. Task requests receive a brief confirmation after their T3 handoff is verified, with detailed results left in T3 by default. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
+Before continuing, the bridge checks T3’s `settled` flag. If the replied-to conversation is settled, or T3 reports that its thread no longer exists (for example, it was deleted), the reply starts a fresh No project thread instead and keeps the quoted text as context. Any other failure to check the thread holds the reply for review without sending it. An ordinary completed agent turn does not close the conversation.
 
-Replying to an older bot response continues its conversation if it is unsettled and makes it active in the same chat again. If that conversation is settled, the reply starts a fresh No project thread instead. Ordinary messages and unprefixed replies to your own messages are ignored. Send exactly `@bot new` to clear the active conversation for this chat; the next message starts a fresh No project thread. Resetting does not interrupt work already started or erase the chat mapping.
+Each conversation is remembered, not a continuously running agent. General questions are answered in this conversation without creating work threads. Simple questions receive a direct answer without a generic acknowledgement. Task requests receive a brief confirmation after their T3 handoff is verified, with detailed results left in T3 by default. Errors and approval notices are still surfaced when needed. Different chats do not share bridge conversation state.
+
+Ordinary messages and unprefixed replies to your own messages are ignored. Each fresh message still receives the chat's recent handoffs and, when history is enabled, recent chat history, so status questions such as `@bot how is the research going?` work without replying.
 
 The assistant uses T3's tools to discover projects, find threads by title, read relevant context, forward messages, or create threads when requested. There is no bridge thread selector, title regex, numbered selection menu, or thread configuration. If the requested destination is ambiguous, the agent can ask you to clarify.
 
@@ -23,8 +25,7 @@ The assistant uses T3's tools to discover projects, find threads by title, read 
 @bot add this to my todo thread in the website project
 @bot #website ask the Launch planning thread what remains to do
 @bot create a research thread in the WhatsApp bot project
-@bot what did you find?
-@bot new
+(reply to the bot) what did you find?
 ```
 
 ## Local conversation history
@@ -89,11 +90,10 @@ An explicit hashtag takes precedence over the chat mapping for that message. Wit
 
 | Command | Result |
 | --- | --- |
-| `@bot #website investigate this` | Send the instruction with the resolved website hint to this chat's No project conversation |
-| `@bot use website for this chat` | Save a default project hint without resetting the conversation |
-| `@bot unmap this chat` | Clear the default hint, including a configured fallback, without resetting the conversation |
+| `@bot #website investigate this` | Start a fresh No project conversation with the resolved website hint |
+| `@bot use website for this chat` | Save a default project hint for this chat |
+| `@bot unmap this chat` | Clear the default hint, including a configured fallback |
 | `@bot projects` | List configured hint aliases without an agent turn |
-| `@bot new` | Reset this chat's conversation; retain its mapping |
 
 Initial mappings live in private `config.json` under `routes`. Mappings saved by chat commands live in `.data/bridge.sqlite` and override the file entry. Restart after changing the configuration file. The `projects` catalog is optional shorthand for hints; it does not limit the projects the agent can discover through T3.
 
@@ -113,7 +113,7 @@ Routine confirmations should be one short, contextual sentence without repeating
 
 Delivery intent is interpreted by the conversational agent, without command keywords or a second model. A default T3 handoff is saved for later status/follow-ups but is not monitored for WhatsApp completion messages. Explicit WhatsApp delivery is stored in SQLite with the exact destination and run, survives restart, and does not occupy the inbox thread while the task runs. New requests can continue using the inbox.
 
-When requested work finishes, the bridge sends its matched result back to the assistant as data for a WhatsApp-specific response. It does not forward the desktop report verbatim. The assistant is instructed to return only what was requested: a notification, findings, a report, or files. Completion remains tied to the original chat and request even if `@bot new` was used meanwhile. Different chats do not share the saved handoff context. Changed/unmatched work runs are held for review rather than sending another run's result.
+When requested work finishes, the bridge sends its matched result back to the assistant as data for a WhatsApp-specific response. It does not forward the desktop report verbatim. The assistant is instructed to return only what was requested: a notification, findings, a report, or files. Completion returns to the original conversation even if newer messages started other conversations meanwhile. Different chats do not share the saved handoff context. Changed/unmatched work runs are held for review rather than sending another run's result.
 
 Reply to an issue with `@bot #website add this to my todo thread`. The assistant finds the destination through T3 and follows that thread's workflow. Recording an item does not authorize implementing it. There is no bridge todo parser or separate todo database.
 
@@ -136,7 +136,7 @@ The setup page manages connection, account authorization, chat access, and histo
 - `accountWide`: `true` to accept your own commands in personal chats, groups, and Message yourself. This requires `selfCommands: true`. Status broadcasts and channels are excluded.
 - `allowedSenderJids`: authorized sender identifiers, populated automatically by guided setup for the paired account. At least one must match the connected account in own-account mode.
 - `projects`: optional shorthand aliases mapped to registered T3 project paths or IDs. Define names such as `website` and `mobile-app`. Hashtags add these targets to the prompt; T3 can discover other projects by name.
-- `noProject`: the registered T3 No project workspace path or ID used for every assistant conversation. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The legacy `rememberContext` field is accepted for compatibility but ignored; per-chat continuity is always enabled.
+- `noProject`: the registered T3 No project workspace path or ID used for every assistant conversation. Defaults to `~/.t3/scratch`; change it if your installation uses another location. The legacy `rememberContext` field is accepted for compatibility but ignored; only replies continue a conversation.
 - `routes`: optional initial chat mappings, for example `{"chatJid":"CHAT_ID","project":"PROJECT_PATH_OR_ID"}`. Account-wide mode does not require any routes. Saved `use ... for this chat` commands override configured mappings.
 - `history`: per-account history policy described above. Guided setup defaults to disabled (`retentionDays: 0`); configurations that omit `history` use 30-day retention with bounded reads and best-effort recent import.
 - `dataDir`: session and database directory, relative to the config file; defaults to `.data`. Preserve the existing directory to retain authorization and pending work.
@@ -209,7 +209,7 @@ Ambiguous T3 submissions and WhatsApp sends are held for review rather than auto
 
 If an existing T3 thread advances to another run in the desktop app, the bot asks you to review there rather than sending an unrelated answer. Long results are split and capped; the full result remains in T3 Code. Shutdown stops further submissions and waits up to ten seconds for in-flight bridge operations and credential writes. Unfinished side effects require review on restart.
 
-`.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, active conversations, handoff targets, delivery preferences, requested work results, and replies in plaintext with no automatic retention cleanup yet. `.data/deliveries/` and `.data/outgoing-files/` contain requested generated files and immutable copies awaiting delivery, without automatic cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
+`.data/bridge.sqlite` stores accepted requests, quoted context, project hints, chat mappings, handoff targets, delivery preferences, requested work results, and replies in plaintext with no automatic retention cleanup yet. `.data/deliveries/` and `.data/outgoing-files/` contain requested generated files and immutable copies awaiting delivery, without automatic cleanup yet. `.data/auth` contains WhatsApp session credentials. Never upload either. Baileys logging is silenced, and connection diagnostics contain only lifecycle information, protocol version, allowlisted error reasons, and command acceptance flags.
 
 Runtime files are created with private permissions where supported by the operating system. The bot uses Baileys's multi-file auth helper. The bridge does not read or modify T3's internal database. Instructions and quoted context submitted to an agent also reach its configured AI provider.
 
@@ -235,7 +235,7 @@ pnpm test
 pnpm build
 ```
 
-`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, separate No project conversations per chat, prompt hints, conversation memory, mappings, task continuity, delivery contracts, opt-in completion tracking, generated-file delivery, scoped history, retention and read budgets, edit/delete handling, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
+`pnpm start` runs the built application. Type checking covers both source and tests. Tests cover account-wide authorization, fresh No project conversations per message, reply continuity, prompt hints, mappings, delivery contracts, opt-in completion tracking, generated-file delivery, scoped history, retention and read budgets, edit/delete handling, migration, reply loops, pairing isolation, shutdown, recovery, Unicode, and CLI validation. Automated tests use synthetic messages and a fake T3 adapter; they do not prove live delivery in every WhatsApp client.
 
 Incoming commands are text only. Voice transcription, remote permission approvals, and private cross-chat result routing are not implemented. Outgoing generated files are supported when requested. Discovery and handoff behavior depend on the T3 tools available to the chosen agent. Completion tracking currently uses the local T3 CLI and the exact accepted work run; it does not follow later desktop runs or linked-machine work. Mapping commands use no extra AI calls.
 

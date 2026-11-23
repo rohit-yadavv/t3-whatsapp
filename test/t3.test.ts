@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { command, T3Cli } from '../src/t3.js';
+import { command, T3Cli, ThreadUnavailableError } from '../src/t3.js';
 import {mkdtempSync, writeFileSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -58,5 +58,19 @@ test('adapter retains settlement metadata and rejects snapshots without it',asyn
     const thread={threadId:'expected',status:'completed',latestRunId:'r1',pendingRequestCount:0};
     respond({thread:{...thread,settled:true},messages:[]});assert.equal((await cli.show('expected')).thread.settled,true);
     respond({thread,messages:[]});await assert.rejects(cli.show('expected'),/Unexpected T3 thread snapshot/);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test('adapter reports a deleted thread distinctly from other CLI failures',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'t3-unavailable-')),binary=join(dir,'fake-t3');
+  const fail=(message:string)=>writeFileSync(binary,`#!${process.execPath}\nconsole.error(${JSON.stringify(message)});process.exit(1)\n`,{mode:0o700});
+  try {
+    const cli=new T3Cli(binary);
+    fail('Thread mcp:gone is no longer available.');
+    await assert.rejects(cli.show('mcp:gone'),(error:unknown)=>error instanceof ThreadUnavailableError && error.threadId==='mcp:gone');
+    fail('Thread mcp:other is no longer available.');
+    await assert.rejects(cli.show('mcp:gone'),(error:unknown)=>!(error instanceof ThreadUnavailableError));
+    fail('Could not connect to T3.');
+    await assert.rejects(cli.show('mcp:gone'),(error:unknown)=>!(error instanceof ThreadUnavailableError));
   } finally {rmSync(dir,{recursive:true,force:true});}
 });

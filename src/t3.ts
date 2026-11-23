@@ -63,6 +63,10 @@ export function command(binary: string, args: string[], input = '', options: Com
     child.stdin.end(input);
   });
 }
+/** T3 reported that the thread no longer exists (for example, it was deleted). */
+export class ThreadUnavailableError extends Error {
+  constructor(readonly threadId: string) { super(`T3 thread ${threadId} is no longer available.`); }
+}
 export class T3Cli implements T3 {
   constructor(private binary: string) {}
   async submit(project: string, prompt: string, thread?: string) {
@@ -76,7 +80,14 @@ export class T3Cli implements T3 {
     return result.data;
   }
   async show(thread: string): Promise<Snapshot> {
-    const result = snapshotSchema.safeParse(await command(this.binary, ['thread','show',thread,'--messages','50','--json']));
+    let output: unknown;
+    try { output = await command(this.binary, ['thread','show',thread,'--messages','50','--json']); }
+    catch (error) {
+      // Only T3's explicit "no longer available" answer counts; outages and timeouts stay ambiguous.
+      if (error instanceof Error && error.message.includes(`Thread ${thread} is no longer available`)) throw new ThreadUnavailableError(thread);
+      throw error;
+    }
+    const result = snapshotSchema.safeParse(output);
     if (!result.success || result.data.thread.threadId !== thread) throw new Error('Unexpected T3 thread snapshot.');
     return result.data;
   }

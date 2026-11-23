@@ -5,7 +5,6 @@ import type {Document,Handoff} from './responses.js';
 import type { Incoming } from './messages.js';
 
 export interface Task { id: string; group_jid: string; message_id: string; project: string; thread_id: string | null; run_id: string | null; state: string; payload: string; notice: string | null }
-export interface ChatContext { project: string; thread_id: string | null; task_id: string | null }
 export interface Outgoing { id: string; group_jid: string; task_id: string; text: string; quote: string; state: string; document:string|null }
 export class Store {
   readonly db: DatabaseSync;
@@ -19,7 +18,6 @@ export class Store {
         project TEXT NOT NULL, thread_id TEXT, run_id TEXT, state TEXT NOT NULL,
         payload TEXT NOT NULL, notice TEXT, UNIQUE(group_jid, message_id));
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, group_jid TEXT, task_id TEXT, text TEXT, quote TEXT, state TEXT);
-      CREATE TABLE IF NOT EXISTS chat_context (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL, thread_id TEXT, task_id TEXT);
       CREATE TABLE IF NOT EXISTS chat_mappings (chat_jid TEXT PRIMARY KEY, project TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sent_messages (id TEXT PRIMARY KEY, content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outbound_contacts (
@@ -47,16 +45,6 @@ export class Store {
     this.db.prepare('INSERT OR REPLACE INTO chat_mappings VALUES (?,?)').run(chat,project);
   }
   unmapChat(chat: string) { this.mapChat(chat,''); }
-  context(chat: string): ChatContext | undefined {
-    return this.db.prepare('SELECT project,thread_id,task_id FROM chat_context WHERE chat_jid=?').get(chat) as unknown as ChatContext | undefined;
-  }
-  focusChat(chat: string, project: string, thread?: string, taskId?: string) {
-    this.db.prepare('INSERT OR REPLACE INTO chat_context VALUES (?,?,?,?)').run(chat,project,thread ?? null,taskId ?? null);
-  }
-  clearContext(chat: string) { this.db.prepare('DELETE FROM chat_context WHERE chat_jid=?').run(chat); }
-  bindContext(task: Task, thread: string) {
-    this.db.prepare('UPDATE chat_context SET thread_id=? WHERE chat_jid=? AND task_id=?').run(thread,task.group_jid,task.id);
-  }
   attachThread(id: string, thread: string | null) { this.db.prepare('UPDATE tasks SET thread_id=? WHERE id=?').run(thread,id); }
   outputDirectory(id:string):string {return join(this.directory,'deliveries',id);}
   setPayload(id:string,payload:unknown) {this.db.prepare('UPDATE tasks SET payload=? WHERE id=?').run(JSON.stringify(payload,BufferJSON.replacer),id);}
